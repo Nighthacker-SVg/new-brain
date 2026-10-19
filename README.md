@@ -19,6 +19,26 @@ This is a responsive frontend prototype using clearly labeled sample data. Proje
 
 Live AI execution, server-side authorization, authentication, persistent storage, public hosting, and autonomous hiring remain future integrations. Review controls currently change demo state; they do not enforce external permissions.
 
+## Run with Docker
+
+Install and start Docker Desktop (or Docker Engine with Compose v2). On **your computer**, open a terminal and run:
+
+```sh
+git clone --branch attendx-office-prototype https://github.com/Nighthacker-SVg/new-brain.git attendx
+cd attendx
+docker compose up --build -d --wait
+```
+
+Then open `http://localhost:8080` in that computer's browser. Docker builds the app and serves the complete current UI; Node and npm are not needed on your computer. The first build needs Internet access to download base images and locked packages.
+
+```sh
+docker compose ps           # confirm the service is healthy
+docker compose logs web    # inspect startup errors
+docker compose down        # stop Attendx
+```
+
+The server runs as a non-root user with a read-only filesystem and binds to your computer's loopback interface. It does not expose a public website or connect real AI agents. Browser sample changes still reset on refresh. See [Docker setup and troubleshooting](docs/docker.md) for another port, updates, and cloud access.
+
 ## Develop
 
 Tested with Node **24.19.0** and npm **11.9.0**. The Node pin is in `.node-version`; dependency versions are locked.
