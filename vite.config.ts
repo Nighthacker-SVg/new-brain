@@ -5,4 +5,7 @@ export default defineConfig({
   plugins: [react()],
   base: './',
   server: { host: '0.0.0.0', allowedHosts: ['terminal.local'] },
+  // Only the generated public site is shared with opaque preview frames.
+  // Keep development source access restricted by Vite's default CORS policy.
+  preview: { host: '0.0.0.0', allowedHosts: ['terminal.local'], cors: true },
 });

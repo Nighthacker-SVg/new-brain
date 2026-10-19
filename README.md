@@ -37,16 +37,17 @@ npm run build
 npm run test:e2e
 ```
 
-The build includes TypeScript checking. Ten Playwright tests cover main user journeys, state regressions, keyboard dialogs, sample exports, tablet controls, mobile navigation, asset loading, browser errors, and page overflow.
+The build includes TypeScript checking. Eleven Playwright tests cover main user journeys, state regressions, keyboard dialogs, sample exports, tablet controls, mobile navigation, asset loading, browser errors, page overflow, and rendering/interactions inside a restricted embedded frame. The runner builds and starts a separate production preview on port 4175; `ATTENDX_BASE_URL` can target an existing production preview instead.
 
 Tests use `/usr/bin/chromium` when installed. Set `ATTENDX_CHROMIUM_PATH` for another executable. On a machine without Chromium, run `npx playwright install chromium` first.
 
 ## Production build
 
 ```sh
-npm run build
-npm run preview -- --host 0.0.0.0 --port 4173 --strictPort
+npm run web-preview
 ```
+
+This builds and serves the compiled `dist/` site on port 4173. Use this command for embedded web previews, where the development server's module and refresh requests can be blocked. Only the public static preview enables cross-origin asset reads; the development server keeps its access restrictions. Sample project actions do not require native form submissions or secure-context UUID APIs. The host frame still controls native file-download support.
 
 The `dist/` directory can be deployed to a static host. Public hosting is not configured by this change.
 

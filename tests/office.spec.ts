@@ -124,7 +124,7 @@ test('tablet view controls remain named when their text is hidden', async ({ pag
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });
 
-test('mobile has a usable list, hidden closed navigation and no page overflow', async ({ page }) => {
+test('mobile has a usable list, hidden closed navigation and no page overflow', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
   await expect(page.locator('.agent-row')).toHaveCount(7);
@@ -137,5 +137,5 @@ test('mobile has a usable list, hidden closed navigation and no page overflow', 
   await expect(page.getByRole('complementary', { name: 'Agent details' }).getByRole('heading', { name: 'Nia', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Close agent details' }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
-  await page.screenshot({ path: 'docs/preview/office-mobile.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('office-mobile.png'), fullPage: true });
 });

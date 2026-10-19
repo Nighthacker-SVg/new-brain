@@ -43,7 +43,7 @@ Reviewed on 2026-10-20. The final production browser screenshot and the approved
 ### Functional evidence
 
 - Frozen `npm ci` installation and `npm run build` passed.
-- All 10 Playwright tests passed against the production build.
+- The initial 10 Playwright tests passed against the production build; the embedded-preview correction below expands the passing suite to 11.
 - A final small change made paused task state visible in list view; the affected selection/pause/list/resume test passed again against the rebuilt production output.
 - Tested selection, search, workspace and stage filters, empty states, project creation and assignment, reassigned-agent pause/resume, review approval/decline, activity actor selection, sample downloads, dialog focus/Escape, tablet view controls, and mobile navigation.
 - Final screenshot run recorded zero browser console/page errors, zero broken images, and no mobile page overflow.
@@ -65,5 +65,19 @@ No actionable P0/P1/P2 findings remain in the implemented prototype scope.
 - [x] Capture desktop, focused detail, tablet, mobile and project dialog states.
 - [x] Compare fresh production captures with the approved source.
 - [x] Build and verify meaningful browser journeys.
+
+## Embedded preview correction
+
+The user reported the built-in Web preview displaying a visualization error. The toolbar itself is outside the available automation tools. A matching class of failure was reproduced locally: an opaque `sandbox="allow-scripts"` frame could not load development modules or compiled CSS/JS because those asset requests had origin `null`. This is a confirmed application compatibility issue, not proof that every toolbar error has that cause.
+
+- Added `npm run web-preview` to build and serve public `dist/` on port 4173.
+- Enabled cross-origin asset reads only for that public static preview. Development source access, host restrictions, and the host frame's sandbox permissions remain unchanged.
+- Removed secure-context UUID requirements for session-local sample identifiers. These identifiers grant no authority and use a prefix distinct from seed data.
+- Kept sample project creation in client state without requiring a native form submission, while preserving field validation and keyboard behavior.
+- The test runner now starts its own freshly compiled preview on port 4175 rather than relying on a pre-existing development server.
+- Test screenshots now go to ignored test-results paths, so routine checks do not rewrite tracked design evidence.
+- All **11 tests passed** in the final run. The added test verifies the heading, rendered SVG icons, pause/resume, and project creation inside an opaque frame where `crypto.randomUUID` is unavailable. It neither grants extra frame permissions nor disables browser security features.
+- Fresh screenshot evidence: `docs/preview/embedded-office.png`, 1488 × 1057. Opened and inspected after the passing run; the approved layout and controls remain intact.
+- Native downloads remain subject to the embedding host's permissions. Public deployment and direct verification of the user's toolbar are separate from the local compatibility evidence.
 
 final result: passed

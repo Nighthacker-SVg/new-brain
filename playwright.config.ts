@@ -9,7 +9,7 @@ export default defineConfig({
   timeout: 45_000,
   reporter: 'list',
   use: {
-    baseURL: process.env.ATTENDX_BASE_URL || 'http://127.0.0.1:4173',
+    baseURL: process.env.ATTENDX_BASE_URL || 'http://127.0.0.1:4175',
     viewport: { width: 1488, height: 1057 },
     headless: true,
     trace: 'retain-on-failure',
@@ -20,9 +20,9 @@ export default defineConfig({
     },
   },
   webServer: process.env.ATTENDX_BASE_URL ? undefined : {
-    command: 'npm run dev -- --host 127.0.0.1 --port 4173 --strictPort',
-    url: 'http://127.0.0.1:4173',
-    reuseExistingServer: !process.env.CI,
+    command: 'npm run build && npm run preview -- --host 127.0.0.1 --port 4175 --strictPort',
+    url: 'http://127.0.0.1:4175',
+    reuseExistingServer: false,
     timeout: 30_000,
   },
 });

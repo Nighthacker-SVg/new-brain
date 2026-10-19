@@ -10,6 +10,7 @@ import {
   initialAgents, initialEvents, initialProjects, initialReviews, stages,
   type Agent, type ActivityEvent, type Project, type Review, type Scope, type Stage,
 } from './model';
+import { createPreviewId } from './preview-id';
 
 type View = 'Office' | 'Projects' | 'Agents' | 'Activity';
 type Dialog = 'project' | 'artifact' | 'review' | null;
@@ -72,13 +73,16 @@ function ProjectForm({ agents, onClose, onSubmit }: { agents: Agent[]; onClose: 
   const [brief, setBrief] = useState('');
   const [team, setTeam] = useState<string[]>(['maya', 'theo']);
   const [error, setError] = useState('');
+  const create = () => {
+    if (!name.trim() || !brief.trim()) { setError('Add a project name and brief.'); return; }
+    if (!team.length) { setError('Choose at least one agent for this project.'); return; }
+    onSubmit({ id: `project-${createPreviewId()}`, name: name.trim(), description: brief.trim(), brief: brief.trim(), scope, stage: 'Intake' }, team);
+  };
   return <Modal title="Assign a new project" onClose={onClose} wide>
     <p className="modal-intro">Give your team a clear brief and a place to get started.</p>
     <form onSubmit={event => {
       event.preventDefault();
-      if (!name.trim() || !brief.trim()) { setError('Add a project name and brief.'); return; }
-      if (!team.length) { setError('Choose at least one agent for this project.'); return; }
-      onSubmit({ id: `project-${crypto.randomUUID()}`, name: name.trim(), description: brief.trim(), brief: brief.trim(), scope, stage: 'Intake' }, team);
+      create();
     }}>
       <label className="field">Project name<input value={name} onChange={event => setName(event.target.value)} required maxLength={70} placeholder="e.g. Meridian customer portal" /></label>
       <fieldset className="scope-options"><legend>Workspace</legend>
@@ -94,7 +98,11 @@ function ProjectForm({ agents, onClose, onSubmit }: { agents: Agent[]; onClose: 
         </label>)}</div>
       </fieldset>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <footer className="modal-actions"><button className="button secondary" type="button" onClick={onClose}>Cancel</button><button className="button primary" type="submit"><Plus /> Create project</button></footer>
+      <footer className="modal-actions"><button className="button secondary" type="button" onClick={onClose}>Cancel</button><button className="button primary" type="submit" onClick={event => {
+        // This action only changes sample state; no native form submission is needed.
+        event.preventDefault();
+        if (event.currentTarget.form?.reportValidity()) create();
+      }}><Plus /> Create project</button></footer>
     </form>
   </Modal>;
 }
@@ -152,7 +160,10 @@ export default function App() {
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  const addEvent = (agentId: string, projectId: string, label: string) => setEvents(old => [{ id: crypto.randomUUID(), agentId, projectId, label, time: 'Just now' }, ...old]);
+  const addEvent = (agentId: string, projectId: string, label: string) => {
+    const event: ActivityEvent = { id: createPreviewId(), agentId, projectId, label, time: 'Just now' };
+    setEvents(old => [event, ...old]);
+  };
   const clearFilters = () => { setQuery(''); setScope('all'); setProjectFilter(null); setStageFilter(null); };
   const navigate = (next: View) => { setView(next); setSidebarOpen(false); setStageFilter(null); setProjectFilter(null); };
   const selectAgent = (agent: Agent) => { setSelectedId(agent.id); setInspectorOpen(true); setMenu(null); };
@@ -175,7 +186,8 @@ export default function App() {
   const createProject = (project: Project, team: string[]) => {
     setProjects(old => [...old, project]);
     setAgents(old => old.map(agent => team.includes(agent.id) ? { ...agent, projectId: project.id, stage: 'Intake', status: 'working', task: `Review the brief for ${project.name}`, activityLabel: 'Reviewing project brief', artifact: { label: 'Project brief · New', kind: 'document' } } : agent));
-    setEvents(old => [...team.map(agentId => ({ id: crypto.randomUUID(), agentId, projectId: project.id, label: `Assigned to ${project.name}`, time: 'Just now' })), ...old]);
+    const assignments = team.map(agentId => ({ id: createPreviewId(), agentId, projectId: project.id, label: `Assigned to ${project.name}`, time: 'Just now' }));
+    setEvents(old => [...assignments, ...old]);
     setDialog(null); setView('Projects'); setScope('all'); setQuery(''); setProjectFilter(null); setStageFilter(null); setSelectedId(team[0]); setInspectorOpen(true);
     setToast(`${project.name} added to the sample workspace.`);
   };
