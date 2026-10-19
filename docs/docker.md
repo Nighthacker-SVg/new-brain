@@ -1,71 +1,66 @@
-# Attendx in Docker
-
-Docker builds the locked frontend dependencies and TypeScript/Vite output, then serves only the compiled public files with Nginx. The runtime image contains no app source checkout, development server, Node runtime, API keys, or autonomous-agent service. Node 24 and the Nginx runtime are pinned to the base-image digests used for verification; update the pins and rerun checks when upgrading them.
+# Docker setup and operations
 
 ## Start on your computer
 
-With Docker Desktop running (or Docker Engine and Compose v2 installed), clone the `attendx-office-prototype` branch, enter that checkout, and run:
+Start Docker Desktop (or Docker Engine with Compose v2). In the prototype checkout:
 
 ```sh
 docker compose up --build -d --wait
 docker compose ps
 ```
 
-Open `http://localhost:8080` **on the same computer that runs Docker**. A cloud machine's localhost is not your computer's localhost. The chat Web preview is not needed for this local workflow.
+`web`, `api` and `runner` should be healthy. Open `http://localhost:8080` on that computer. Create an account, open Settings and add a provider. The chat preview and a cloud machine's localhost are separate from your computer's browser.
 
-The service must show `healthy`. If it fails, inspect `docker compose logs web`. A port-allocation error means another program owns port 8080; choose a different port rather than stopping that program.
-
-If your organization's HTTPS proxy uses a private certificate authority, provide its trusted PEM bundle as an optional build secret. Keep TLS verification enabled. For example, on a system where the trusted bundle is `/etc/ssl/certs/ca-certificates.crt`:
+On Linux, set the broker's Docker socket group before starting:
 
 ```sh
+export ATTENDX_DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+docker compose up --build -d --wait
+```
+
+Socket access belongs to the broker only. Never mount it into API/frontend/generated jobs.
+
+## Another port
+
+On macOS/Linux: `ATTENDX_PORT=8081 docker compose up --build -d --wait`.
+
+In PowerShell, set `$env:ATTENDX_PORT = "8081"`, then run Compose. Open `http://localhost:8081`. The binding remains local.
+
+## AI providers
+
+Settings stores up to 16 encrypted provider records. Blank role routing serves all roles; otherwise enter comma-separated IDs: `manager`, `engineer`, `quality`, `security`, `designer`, `researcher`, `data`. Lower priority is tried first. Every attempt reserves budget, including the one allowed fallback.
+
+OpenAI-compatible bases include OpenAI `/v1`, OpenRouter `/api/v1`, Groq `/openai/v1`, DeepSeek `/v1` and Gemini `/v1beta/openai`. Anthropic uses `/v1` and its own messages protocol. Model availability depends on your account. Changing a destination/protocol requires a new credential; an old key is not forwarded to another provider.
+
+For local Ollama, use `http://host.docker.internal:11434/v1` with keyless local mode. Its model must already be available and its server must accept connections from Docker's host gateway. Attendx does not install or start Ollama.
+
+Custom HTTPS hosts require administrator configuration via `ATTENDX_PROVIDER_HOSTS` in a local `.env`, followed by Compose reconciliation. Optional environment fallback uses `ATTENDX_MODEL`, `ATTENDX_MODEL_API_KEY`, `ATTENDX_MODEL_BASE_URL` and `ATTENDX_MODEL_LOCAL`; it is restricted to the first account. Prefer per-account Settings. Never commit `.env` or use browser `VITE_` variables for keys.
+
+## Cloud proxy certificates
+
+This sandbox has a read-only home and an HTTPS proxy trust bundle. Keep TLS/package verification enabled; pass the trusted CA only for dependency installation:
+
+```sh
+export BUILDX_CONFIG=/tmp/attendx-buildx
 docker build --secret id=build_ca,src=/etc/ssl/certs/ca-certificates.crt -t attendx-office:local .
+docker build --target api -t attendx-api:local .
+docker build -f runner/Dockerfile -t attendx-runner:local .
+export ATTENDX_DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
 docker compose up --no-build -d --wait
 ```
 
-Use your actual trusted bundle path. The certificate mount exists only during dependency installation and is not copied into the image. This extra step is unnecessary on computers with ordinary public HTTPS access. In this cloud sandbox, Buildx also needs a writable config directory; prefix Docker build commands with `BUILDX_CONFIG=/tmp/attendx-buildx`.
+Ordinary Docker Desktop installations with public HTTPS access need no CA step. This fixes build trust only; model runtime connections behind a corporate/cloud proxy may need separate approved trust/proxy configuration and allowed domains. Paid remote calls were not verified in this session.
 
-For port 8081 on macOS/Linux:
+## Data, updates and backups
 
-```sh
-ATTENDX_PORT=8081 docker compose up --build -d --wait
-```
+Use `git pull --ff-only` and `docker compose up --build -d --wait` to update a clean checkout. Stop with `docker compose down`; data remains. Inspect errors with `docker compose logs api runner web`.
 
-For port 8081 in Windows PowerShell:
+Back up data/control volumes while stopped. SQLite and `/data/master.key` belong together; the encryption key is deliberately outside the database. Retain `/control/runner-key` too. Do not remove normal workspace volumes during updates. Password/email recovery is not included in this local beta.
 
-```powershell
-$env:ATTENDX_PORT = "8081"
-docker compose up --build -d --wait
-```
+## Isolation and exposure
 
-Then open `http://localhost:8081`. The binding remains local to your computer.
+Web/API run non-root with read-only roots, dropped capabilities and resource limits. The private broker is trusted with the Docker daemon socket, which grants administrative host access. For production separation, put it on a dedicated worker host without unrelated workloads; local Compose is not a hostile multi-tenant security boundary.
 
-## Update or stop
+Generated jobs use fixed pinned images, no network, no host mounts/secrets/capabilities, a non-root UID, read-only root and bounded temporary storage, CPU, memory, processes, time and output. Model text cannot supply Docker flags, mounts, images or arbitrary shell commands. Empty/skipped tests never count as passing execution.
 
-From a clean checkout of the prototype branch:
-
-```sh
-git pull --ff-only
-docker compose up --build -d --wait
-```
-
-Stop with `docker compose down`. There are no database volumes or saved agent jobs in this prototype; sample state lives in the browser and resets on refresh.
-
-## Verify
-
-The image healthcheck requests `/healthz`. The runtime runs as UID/GID 101, drops all Linux capabilities, disallows gaining privileges, uses a read-only root filesystem with a small temporary filesystem, and has CPU, memory and process limits. The build context excludes Git history, local environment files, dependency folders and screenshots. Only public build output permits cross-origin asset reads for restricted preview frames.
-
-If Node and browser-test dependencies are also installed on the host, run the existing browser suite against the container:
-
-```sh
-ATTENDX_BASE_URL=http://127.0.0.1:8080 npm run test:e2e
-```
-
-These are optional developer checks, not requirements to run the UI. The production image intentionally omits test tools. Docker does not turn the sample review controls into real authorization or connect model providers.
-
-Verified in the cloud environment: the Docker image built with locked packages and TypeScript checking; Compose reached `healthy`; all 11 existing browser tests passed against the container, including the opaque iframe and sample download. HTTP checks confirmed correct asset MIME types, cross-origin public asset access, and 404 responses for missing modules and private source paths. Runtime inspection confirmed UID/GID 101, dropped capabilities, a read-only root filesystem, and absence of the build CA mount. The loopback healthcheck explicitly bypasses outbound proxies.
-
-## Remote or public access
-
-This Compose configuration intentionally listens only on the Docker host's loopback interface. On a remote server, use an authenticated SSH tunnel, for example `ssh -L 8080:127.0.0.1:8080 user@server`, then open `http://localhost:8080` on your computer. The example needs your actual server address and SSH access; no tunnel or public deployment is provisioned here.
-
-Public deployment needs a hosting destination and HTTPS/access controls appropriate to the data being displayed. Do not put provider credentials in this frontend image or browser variables.
+Public access needs a chosen host, HTTPS and reviewed access controls. Set `ATTENDX_PUBLIC_ORIGIN` only for an intended public proxy. No deployment/tunnel is provisioned. With existing SSH access, a tunnel such as `ssh -L 8080:127.0.0.1:8080 user@server` can connect your browser to a remote service.

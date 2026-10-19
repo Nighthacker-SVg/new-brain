@@ -6,7 +6,7 @@ test('compiled preview renders SVG icons and works in an opaque sandbox without 
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
-  await page.setContent(`<style>html,body{margin:0;width:100%;height:100%}iframe{display:block;width:100%;height:100%;border:0}</style><iframe title="Attendx embedded preview" sandbox="allow-scripts" src="${baseURL}/"></iframe>`);
+  await page.setContent(`<style>html,body{margin:0;width:100%;height:100%}iframe{display:block;width:100%;height:100%;border:0}</style><iframe title="Attendx embedded preview" sandbox="allow-scripts" src="${baseURL}/?demo=1"></iframe>`);
   const frame = page.frameLocator('iframe[title="Attendx embedded preview"]');
   await expect(frame.getByRole('heading', { name: 'Your company, at work.' })).toBeVisible();
   expect(await frame.locator('svg').count()).toBeGreaterThan(0);

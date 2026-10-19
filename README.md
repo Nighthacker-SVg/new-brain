@@ -1,27 +1,12 @@
-# Attendx — Your company, at work
+# Attendx — Your AI company, connected
 
-An interactive implementation of the approved gray-and-yellow virtual office, with client studios, product teams, named agents, delivery stages, and an activity inspector.
+A Dockerized live workspace with named AI agents, persistent projects, multi-provider chat and planning, isolated code verification, reviewable delivery artifacts, and a gray/yellow virtual office. This is an initial backend beta with explicit execution limits, not an unrestricted autonomous company.
 
-![Attendx office running in Chromium](docs/preview/office-desktop.png)
+![Attendx live office](docs/preview/live-office.png)
 
-## Current scope
+## Start or update
 
-This is a responsive frontend prototype using clearly labeled sample data. Project assignments, task controls, and review decisions update the current browser session. Refreshing restores the sample workspace.
-
-- Select any of seven agents in the office or the keyboard-accessible list.
-- View projects, tasks, observed sample actions, and artifacts.
-- Pause and resume sample tasks.
-- Search and filter agents, projects, workspaces, stages, and activity.
-- Create a project and assign its team.
-- Approve or decline a sample staging access request.
-- View and download an explicitly labeled sample artifact.
-- Use responsive mobile navigation and dialogs with keyboard focus support.
-
-Live AI execution, server-side authorization, authentication, persistent storage, public hosting, and autonomous hiring remain future integrations. Review controls currently change demo state; they do not enforce external permissions.
-
-## Run with Docker
-
-Install and start Docker Desktop (or Docker Engine with Compose v2). On **your computer**, open a terminal and run:
+Install/start Docker Desktop and Git. For a new checkout:
 
 ```sh
 git clone --branch attendx-office-prototype https://github.com/Nighthacker-SVg/new-brain.git attendx
@@ -29,58 +14,63 @@ cd attendx
 docker compose up --build -d --wait
 ```
 
-Then open `http://localhost:8080` in that computer's browser. Docker builds the app and serves the complete current UI; Node and npm are not needed on your computer. The first build needs Internet access to download base images and locked packages.
+For an existing checkout, run `git pull --ff-only`, then `docker compose up --build -d --wait`. Open `http://localhost:8080` **on the computer running Docker**. Node/npm are not required to run the app.
 
-```sh
-docker compose ps           # confirm the service is healthy
-docker compose logs web    # inspect startup errors
-docker compose down        # stop Attendx
-```
+On Linux, if the runner cannot access the Docker socket, set `ATTENDX_DOCKER_GID` to the output of `stat -c '%g' /var/run/docker.sock` before starting Compose. Docker Desktop normally uses the default group. See [Docker setup](docs/docker.md) for cloud proxy certificates, another port, backups, and troubleshooting.
 
-The server runs as a non-root user with a read-only filesystem and binds to your computer's loopback interface. It does not expose a public website or connect real AI agents. Browser sample changes still reset on refresh. See [Docker setup and troubleshooting](docs/docker.md) for another port, updates, and cloud access.
+## Give the company real work
 
-## Develop
+1. Create a workspace account with a password of at least 12 characters.
+2. Open **Settings → Add provider**. Choose a preset/protocol, enter a model available to your account and its API key, and save. Add more providers with the **+** button. Keys are encrypted on the server and never returned in full.
+3. Click **Assign project**. Describe the deliverable, acceptance criteria, budget and team. An optional public GitHub URL authorizes bounded, read-only source import.
+4. Select **Generate plan**. Clarify the manager's questions in Chat, then generate an updated plan. Approve a complete plan in the project's reviews.
+5. Select **Run approved plan**. The worker produces candidate files, executes supported checks in a disposable Docker container, and records real results. Failing executable tests may trigger one budgeted implementation repair; that repair cannot edit the original tests.
+6. Open **Evidence** for source files, a source ZIP, diffs, test reports, and a static HTML preview when available. Review code and acceptance criteria before approving the release record. Approval does not push, merge, or publish a website.
 
-Tested with Node **24.19.0** and npm **11.9.0**. The Node pin is in `.node-version`; dependency versions are locked.
+Without a configured model, jobs become visibly blocked; no AI responses or passing results are fabricated. A provider account needs model access/API credit. Ollama models must already be installed and accessible to Docker.
+
+## Included capabilities
+
+| Capability | Behavior |
+| --- | --- |
+| Persistent accounts/projects | Password hashing, expiring sessions, CSRF checks, account-scoped SQLite storage and durable queued jobs. Refreshing retains live state. |
+| Multiple providers | OpenAI-compatible APIs and Anthropic; role routing, priority and at most one alternate provider per call. Keyless local Ollama is supported. |
+| Named-agent chat | Individual personas, project-scoped history and approved memory. Chat cannot silently change permissions or deploy code. |
+| Project delivery | Plan approval, candidate source, actual Node/Python checks, test evidence, ZIP, diffs and sandboxed static HTML previews. |
+| Bounded hiring | Allowlisted role templates, maximum 12 agents/account, project-scoped specialist authority, spending ceiling and expiry. Manager-proposed hires require owner review. |
+| Memory/improvement | Owner-approved project memory; baseline/candidate instruction evaluations with explicit fixtures; approved promotion and rollback. Versions stay project-scoped. |
+| Ongoing verification | Up to six schedules/account periodically rerun checks on existing candidate files. This does not monitor a publicly deployed product. |
+| Live office/motion | Server-sent events, coalesced refreshes, actual job/status/budget indicators, active-job beacons, responsive layouts, keyboard dialogs and reduced-motion support. |
+
+## Current boundaries
+
+- Execution supports **dependency-free Node.js and Python standard-library projects**. Jobs have no network or package installation. Applications needing npm/pip dependencies, databases or external services require a future approved execution profile.
+- Public repository import is limited to 60 safe UTF-8 text files, 120 KB/file, 600 KB total and a 180 KB model-context limit. Private, binary-heavy or larger repositories fail explicitly. No automatic push, merge or deployment occurs.
+- HTML previews are static, sandboxed and have scripting disabled; they are not deployed full-stack previews.
+- Improvement changes evaluated instructions and produces reviewable code candidates. Agents cannot replace their running control plane, retrain model weights, expand permissions or alter budgets/audit records.
+- Model amounts are conservative **reservations**, not verified invoices. Concurrency, tokens, attempts and execution time are bounded too. Configure reservations for your model and use provider-side spending limits.
+- Voice, arbitrary browser automation, private-repository integrations, SSO/password recovery, production infrastructure and public domain/HTTPS hosting are not included.
+
+See the [readiness and security report](docs/readiness.md). The earlier sample office remains explicitly available at `/?demo=1` and resets on refresh.
+
+## Architecture and data
+
+Compose starts `web` (Nginx), `api` (Node 24 control plane/durable worker) and `runner` (private Docker execution broker). Only web port 8080 is published, on loopback. Generated jobs never receive host mounts, provider credentials, the control key or a Docker socket. The broker alone has daemon access and is a trusted administrative component.
+
+The `attendx_data` volume holds SQLite/journals and a separate provider encryption master key. `attendx_control` holds the runner key. Back up both while stopped; losing the master key makes saved provider credentials unreadable. `docker compose down` retains data. Do not use `down --volumes` for the normal workspace.
+
+## Developer checks
+
+With Node 24, locked dependencies and Chromium/Playwright installed:
 
 ```sh
 npm ci
-npm run dev -- --host 0.0.0.0 --port 4173 --strictPort
-```
-
-Use the existing checkout. Cloud tasks already have an isolated workspace; create a separate Git worktree only when explicitly requested.
-
-## Validate
-
-```sh
 npm run build
-npm run test:e2e
+npm run test:server
+npm run test:runner
+npm run test:live
 ```
 
-The build includes TypeScript checking. Eleven Playwright tests cover main user journeys, state regressions, keyboard dialogs, sample exports, tablet controls, mobile navigation, asset loading, browser errors, page overflow, and rendering/interactions inside a restricted embedded frame. The runner builds and starts a separate production preview on port 4175; `ATTENDX_BASE_URL` can target an existing production preview instead.
+`test:runner` needs Docker. `test:live` expects the three app images already built; it creates a random isolated Compose project, adds a deterministic HTTP model fixture, runs browser checks and removes only its own test containers/data. It uses no paid model billing. Tests use `/usr/bin/chromium`, `ATTENDX_CHROMIUM_PATH`, or an installed Playwright Chromium (`npx playwright install chromium`).
 
-Tests use `/usr/bin/chromium` when installed. Set `ATTENDX_CHROMIUM_PATH` for another executable. On a machine without Chromium, run `npx playwright install chromium` first.
-
-## Production build
-
-```sh
-npm run web-preview
-```
-
-This builds and serves the compiled `dist/` site on port 4173. Use this command for embedded web previews, where the development server's module and refresh requests can be blocked. Only the public static preview enables cross-origin asset reads; the development server keeps its access restrictions. Sample project actions do not require native form submissions or secure-context UUID APIs. The host frame still controls native file-download support.
-
-The `dist/` directory can be deployed to a static host. Public hosting is not configured by this change.
-
-## Design evidence
-
-- [Approved combined concept](combined-office.png)
-- [Desktop browser screenshot](docs/preview/office-desktop.png)
-- [Mobile browser screenshot](docs/preview/office-mobile.png)
-- [Project assignment dialog](docs/preview/assign-project.png)
-- [Design QA and verification](design-qa.md)
-
-The office scene and seven portraits are generated raster assets. Icons come from Phosphor; Inter is bundled locally. There are no third-party runtime image or font requests.
-
-## Connecting real agents
-
-Keep model credentials, client data boundaries, spending limits, and authorization in a server-side service. Feed the UI recorded task/tool events, redacting sensitive fields before display. The office and frontend controls are presentation, not a security boundary. Provider credentials belong outside browser code and `VITE_` variables.
+For frontend editing, keep Docker running and use `npm run dev -- --host 0.0.0.0 --port 4174 --strictPort`; Vite proxies `/api` through the local Docker web service. Dev host/CORS protections remain enabled. Cloud tasks already have isolated workspaces; use the existing checkout unless a worktree is explicitly requested.

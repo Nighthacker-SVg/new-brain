@@ -9,6 +9,10 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --pretty false",
     "test:e2e": "playwright test",
+    "test:server": "node --test server/test/*.test.mjs runner/test/*.test.mjs",
+    "test:runner": "node --test runner/test/docker.integration.mjs",
+    "test:live": "node scripts/test-live.mjs",
+    "server": "node server/api.mjs",
     "web-preview": "npm run build && vite preview --host 0.0.0.0 --port 4173 --strictPort"
   },
   "dependencies": {
@@ -26,7 +30,7 @@
     "vite": "8.3.4"
   },
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=24.0.0"
   },
   "packageManager": "npm@11.9.0"
 }

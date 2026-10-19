@@ -1,0 +1,328 @@
+/* Small, compositor-friendly motion. Running indicators require actual job state. */
+:root {
+  --motion-ease: cubic-bezier(0.2, 0.75, 0.25, 1);
+  --motion-yellow: #ffd438;
+  --motion-quiet: #717987;
+}
+
+@keyframes attendx-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+@keyframes attendx-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes attendx-beacon {
+  0%,
+  100% {
+    opacity: 0.18;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.15);
+  }
+}
+@keyframes attendx-marker-ring {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.98);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scale(1.035);
+  }
+}
+@keyframes attendx-signal {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes attendx-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes attendx-flow-arrow {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: translateX(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(3px);
+  }
+}
+
+/* Entrance motion runs once when a surface mounts, never on every live update. */
+.motion-enter,
+.modal,
+.popover,
+.toast,
+.lx-dialog {
+  animation: attendx-enter 220ms var(--motion-ease) both;
+}
+.modal-backdrop,
+.lx-dialog-backdrop {
+  animation: attendx-fade 140ms ease-out both;
+}
+.page-heading {
+  animation: attendx-enter 280ms var(--motion-ease) both;
+}
+.motion-list > :nth-child(-n + 8) {
+  animation: attendx-enter 260ms var(--motion-ease) both;
+}
+.motion-list > :nth-child(2) {
+  animation-delay: 25ms;
+}
+.motion-list > :nth-child(3) {
+  animation-delay: 50ms;
+}
+.motion-list > :nth-child(4) {
+  animation-delay: 75ms;
+}
+.motion-list > :nth-child(5) {
+  animation-delay: 100ms;
+}
+.motion-list > :nth-child(n + 6) {
+  animation-delay: 120ms;
+}
+
+/* Do not change marker transforms: the office owns their coordinate anchoring. */
+.agent-marker,
+.lx-agent-marker {
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 160ms ease;
+}
+.lx-agent-marker[data-state="running"]::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border: 1px solid #b58a16;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: attendx-marker-ring 2400ms ease-in-out infinite;
+}
+.lx-agent-marker[data-state="running"] {
+  border-color: #ceaa32;
+}
+.lx-agent-marker[aria-pressed="true"] {
+  border-color: #e8b800;
+  box-shadow:
+    0 0 0 2px #fff4c1,
+    0 6px 22px #312d2133;
+}
+
+.office-motion {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+  contain: strict;
+}
+.office-motion-beacon {
+  position: absolute;
+  width: 74px;
+  height: 28px;
+  margin-left: -37px;
+  margin-top: 7px;
+}
+.office-motion-ring,
+.office-motion-core {
+  position: absolute;
+  inset: 0;
+  border: 1px solid #977300;
+  border-radius: 50%;
+  background: #ffd43821;
+}
+.office-motion-ring {
+  animation: attendx-beacon 2600ms ease-in-out infinite;
+}
+.office-motion-core {
+  inset: 7px 17px;
+  background: #ffd43875;
+  border-color: #b88d11;
+}
+.office-motion-beacon.is-selected .office-motion-ring {
+  border-width: 2px;
+}
+
+/* Opt-in workflow signals: only the running stage receives movement. */
+.motion-workflow {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.motion-workflow > li {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.motion-workflow > li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 1px;
+  background: #bcc2cb;
+  right: -7px;
+  top: 50%;
+}
+.motion-workflow > li[data-state="running"] {
+  color: #755700;
+}
+.motion-workflow > li[data-state="running"] .motion-flow-arrow,
+.lx-workflow [data-state="running"] .motion-flow-arrow {
+  animation: attendx-flow-arrow 1600ms ease-in-out infinite;
+}
+
+/* Connected is stable; a finite pulse marks connection, not fabricated activity. */
+.lx-connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.lx-connection::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--motion-quiet);
+}
+.lx-connection[data-connection="connected"]::before {
+  background: #248b41;
+  animation: attendx-signal 900ms ease-in-out 2;
+}
+.lx-connection[data-connection="reconnecting"]::before {
+  background: #a77805;
+  animation: attendx-signal 1300ms ease-in-out infinite;
+}
+.lx-connection[data-connection="disconnected"]::before {
+  background: #a04c40;
+}
+
+.motion-spinner {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #c7cbd2;
+  border-top-color: #745a06;
+  border-radius: 50%;
+  vertical-align: -0.15em;
+  animation: attendx-spin 800ms linear infinite;
+}
+.motion-skeleton {
+  display: block;
+  min-height: 14px;
+  border-radius: 5px;
+  background: #dce0e6;
+  pointer-events: none;
+  animation: attendx-signal 1500ms ease-in-out infinite;
+}
+.motion-skeleton + .motion-skeleton {
+  margin-top: 10px;
+}
+
+.lx-project-card,
+.project-card,
+.lx-inspector,
+.lx-metrics,
+.lx-feed {
+  contain: style;
+}
+.lx-project-card,
+.project-card,
+.new-project-tile,
+.lx-provider-card {
+  transition:
+    transform 150ms var(--motion-ease),
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+.button,
+.icon-button,
+.nav-item,
+.lx-nav button {
+  transition:
+    transform 120ms var(--motion-ease),
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+.button:not(:disabled):active,
+.icon-button:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lx-project-card:hover,
+  .project-card:hover,
+  .lx-provider-card:hover {
+    transform: translateY(-2px);
+    border-color: #c2b477;
+    box-shadow: 0 7px 20px #2026350a;
+  }
+  .new-project-tile:hover {
+    transform: translateY(-2px);
+  }
+  .nav-item:not(.active):hover,
+  .lx-nav button:not([aria-current="page"]):hover {
+    transform: translateX(2px);
+  }
+}
+
+@media (max-width: 600px) {
+  .office-motion-beacon {
+    width: 56px;
+    height: 22px;
+    margin-left: -28px;
+  }
+  .office-motion-core {
+    inset: 5px 13px;
+  }
+  .motion-workflow > li:not(:last-child)::after {
+    width: 8px;
+    right: -4px;
+  }
+}
+
+/* Keep state indicators visible, while removing all nonessential movement. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  .office-motion-ring {
+    opacity: 0.55;
+  }
+  .motion-skeleton {
+    opacity: 0.65;
+  }
+}

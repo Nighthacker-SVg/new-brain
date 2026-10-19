@@ -6,6 +6,11 @@ services:
     build:
       context: .
       target: runtime
+    depends_on:
+      api:
+        condition: service_healthy
+      runner:
+        condition: service_healthy
     ports:
       - "127.0.0.1:${ATTENDX_PORT:-8080}:8080"
     read_only: true
@@ -19,3 +24,65 @@ services:
     mem_limit: 128m
     cpus: 1.0
     restart: unless-stopped
+
+  api:
+    image: attendx-api:local
+    build:
+      context: .
+      target: api
+    environment:
+      ATTENDX_MODEL_BASE_URL: ${ATTENDX_MODEL_BASE_URL:-https://api.openai.com/v1}
+      ATTENDX_MODEL: ${ATTENDX_MODEL:-}
+      ATTENDX_MODEL_API_KEY: ${ATTENDX_MODEL_API_KEY:-}
+      ATTENDX_MODEL_LOCAL: ${ATTENDX_MODEL_LOCAL:-false}
+      ATTENDX_PROVIDER_HOSTS: ${ATTENDX_PROVIDER_HOSTS:-}
+      ATTENDX_MAX_CALL_CENTS: ${ATTENDX_MAX_CALL_CENTS:-25}
+      ATTENDX_PUBLIC_ORIGIN: ${ATTENDX_PUBLIC_ORIGIN:-}
+    volumes:
+      - attendx_data:/data
+      - attendx_control:/control
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1.0
+    restart: unless-stopped
+
+  runner:
+    image: attendx-runner:local
+    build:
+      context: .
+      dockerfile: runner/Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      ATTENDX_RUNNER_KEY_PATH: /control/runner-key
+    volumes:
+      - attendx_control:/control:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "10001"
+      - "${ATTENDX_DOCKER_GID:-0}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 96
+    mem_limit: 256m
+    cpus: 1.0
+    restart: unless-stopped
+
+volumes:
+  attendx_data:
+  attendx_control:

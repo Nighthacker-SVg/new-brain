@@ -12,4 +12,10 @@
 !public/**
 !docker/
 !docker/nginx.conf
+!server/
+!server/**
+!runner/
+!runner/**
+server/test/
+runner/test/
 **/.env*
