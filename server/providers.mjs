@@ -1,6 +1,7 @@
 import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
+import { isLocalProvider, runtimePolicy } from "./runtime-policy.mjs";
 
 const DEFAULT_HOSTS = [
   "api.openai.com",
@@ -74,7 +75,10 @@ export function validateProviderUrl(value, allowedHosts) {
 export class ProviderRegistry {
   constructor(store, options = {}) {
     this.store = store;
-    this.allowedHosts = options.allowedHosts;
+    this.env = options.env ?? process.env;
+    this.allowedHosts =
+      options.allowedHosts ?? (this.env.ATTENDX_PROVIDER_HOSTS || "").split(",");
+    this.policy = runtimePolicy(this.env);
     const file =
       options.masterKeyPath ||
       process.env.ATTENDX_MASTER_KEY_PATH ||
@@ -200,6 +204,11 @@ export class ProviderRegistry {
       fail("Keyless local mode is limited to the local Ollama hosts.");
     if (local && value.type !== "openai")
       fail("Local keyless providers must use the OpenAI-compatible protocol.");
+    if (
+      this.policy.localOnly &&
+      !isLocalProvider({ ...value, baseUrl, local })
+    )
+      fail("This server permits local models only. Remote AI providers are disabled.", 403);
     if (value.enabled !== undefined && typeof value.enabled !== "boolean")
       fail("Enabled must be true or false.");
     if (value.local !== undefined && typeof value.local !== "boolean")
@@ -297,6 +306,11 @@ export class ProviderRegistry {
       )
       .all(ownerId)
       .filter((row) => {
+        if (
+          this.policy.localOnly &&
+          !isLocalProvider(this.metadata(row))
+        )
+          return false;
         const roles = JSON.parse(row.roles_json).map((value) =>
           value.toLowerCase().trim(),
         );

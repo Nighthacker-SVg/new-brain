@@ -1028,6 +1028,98 @@
 .lx-settings > .lx-info {
   margin-bottom: 24px;
 }
+.lx-form-policy {
+  margin: 0;
+  align-self: stretch;
+}
+.lx-form-policy strong {
+  display: block;
+  color: #645c3e;
+}
+.lx-local-runtime {
+  border: 1px solid #e9e5ce;
+  border-radius: 8px;
+  padding: 20px;
+  background: #fffdf4;
+  margin-bottom: 22px;
+}
+.lx-local-runtime > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.lx-local-runtime > div > svg {
+  flex: none;
+  color: #a18b49;
+}
+.lx-local-runtime strong {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+.lx-local-runtime small,
+.lx-local-runtime p {
+  font-size: 11px;
+  line-height: 1.7;
+  color: #71796e;
+}
+.lx-local-runtime dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  font-size: 11px;
+  margin: 20px 0 12px;
+}
+.lx-local-runtime dl > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.lx-local-runtime dd {
+  margin: 0;
+  font-weight: 650;
+}
+.lx-local-runtime p {
+  margin: 0;
+}
+.lx-research > .lx-task-list {
+  margin-bottom: 22px;
+}
+.lx-research .lx-info .lx-text-button {
+  display: block;
+  margin-top: 8px;
+}
+.lx-knowledge-search {
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--lx-line);
+  margin-bottom: 24px;
+}
+.lx-knowledge-results {
+  margin-top: 18px;
+}
+.lx-knowledge-result {
+  border: 1px solid var(--lx-line);
+  background: #fafbf9;
+  border-radius: 7px;
+  padding: 14px;
+  margin-top: 10px;
+}
+.lx-knowledge-result strong {
+  display: block;
+  font-size: 12px;
+}
+.lx-knowledge-result small {
+  display: block;
+  margin-top: 4px;
+  color: #8a939d;
+  font-size: 10px;
+}
+.lx-knowledge-result p {
+  font-size: 11px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .lx-provider-card h3 {
   font-size: 18px;
   margin: 0 0 6px;

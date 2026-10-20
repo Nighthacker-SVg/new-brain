@@ -1,4 +1,5 @@
 import { validateProviderUrl } from "./providers.mjs";
+import { isLocalProvider, runtimePolicy } from "./runtime-policy.mjs";
 
 const MAX_OUTPUT_TOKENS = 8_192;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -37,7 +38,7 @@ function environmentProvider(env) {
   };
 }
 
-function checkedConfig(input, env, allowedHosts) {
+function checkedConfig(input, env, allowedHosts, policy = runtimePolicy(env)) {
   if (!input || typeof input !== "object" || Array.isArray(input))
     fail("invalid_config", "Choose a valid AI provider in Settings.");
   const type = input.type || "openai";
@@ -85,6 +86,11 @@ function checkedConfig(input, env, allowedHosts) {
   }
   const local =
     bool(input.local) && LOCAL_HOSTS.has(url.hostname) && type === "openai";
+  if (policy.localOnly && !local)
+    fail(
+      "local_only",
+      "This server permits local models only. Remote AI providers are disabled.",
+    );
   if (!apiKey && !local)
     fail(
       "missing_key",
@@ -97,7 +103,7 @@ function checkedConfig(input, env, allowedHosts) {
     );
   // Only a fixed endpoint suffix is accepted; callers cannot supply a per-call URL.
   const endpoint = `${String(baseUrl).replace(/\/+$/, "")}/${type === "anthropic" ? "messages" : "chat/completions"}`;
-  return { type, model: input.model, apiKey, endpoint };
+  return { type, model: input.model, apiKey, endpoint, local };
 }
 
 export function providerAvailable(config, options = {}) {
@@ -285,6 +291,7 @@ function statusError(status) {
 /** Real model adapter; no model/key means a blocked job, never simulated AI text. */
 export function createProvider(options = {}) {
   const env = options.env ?? process.env;
+  const policy = runtimePolicy(env);
   const fetchImpl = options.fetch ?? options.fetchImpl ?? globalThis.fetch;
   const defaultConfig =
     options.provider ??
@@ -292,21 +299,22 @@ export function createProvider(options = {}) {
     (options.model || options.apiKey || options.baseUrl
       ? options
       : environmentProvider(env));
-  const timeoutMs = Math.max(
+  const requestedTimeoutMs = Math.max(
     1,
     Math.min(
-      120_000,
-      Number.isFinite(options.timeoutMs) ? options.timeoutMs : 45_000,
+      900_000,
+      Number.isFinite(options.timeoutMs) ? options.timeoutMs : policy.modelTimeoutMs,
     ),
   );
   const outputLimit = Math.max(
     1,
     Math.min(
       MAX_OUTPUT_TOKENS,
-      Number.isSafeInteger(options.maxTokens) ? options.maxTokens : 4_096,
+      Number.isSafeInteger(options.maxTokens) ? options.maxTokens : policy.maxTokens,
     ),
   );
   return {
+    defaultLocal: isLocalProvider(defaultConfig),
     configured: providerAvailable(defaultConfig, {
       env,
       allowedHosts: options.allowedHosts,
@@ -323,6 +331,11 @@ export function createProvider(options = {}) {
         provider ?? defaultConfig,
         env,
         options.allowedHosts,
+        policy,
+      );
+      const timeoutMs = Math.min(
+        config.local ? 900_000 : 120_000,
+        requestedTimeoutMs,
       );
       const input = messagesForRequest(messages, system, json);
       if (signal?.aborted) fail("cancelled", "This AI request was cancelled.");

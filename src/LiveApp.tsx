@@ -46,6 +46,7 @@ import { api, ApiError, mutate, setCsrfToken } from "./live-api";
 import type {
   LiveAgent,
   LiveArtifact,
+  LiveKnowledgeItem,
   LiveProject,
   LiveProvider,
   LiveState,
@@ -84,6 +85,7 @@ type Action = (
 type WorkspaceTab =
   | "Overview"
   | "Chat"
+  | "Research"
   | "Evidence"
   | "Memory"
   | "Improve"
@@ -410,6 +412,7 @@ function ProjectForm({
   action: Action;
   onCreated: (id: string) => void;
 }) {
+  const localOnly = state.runtimePolicy?.localOnly === true;
   const [name, setName] = useState(""),
     [brief, setBrief] = useState(""),
     [criteria, setCriteria] = useState(""),
@@ -507,21 +510,33 @@ function ProjectForm({
             />
             <small>Read-only public import. No automatic push or merge.</small>
           </label>
-          <label className="lx-field">
-            Model budget · USD
-            <input
-              type="number"
-              min="0.25"
-              max="10000"
-              step="0.01"
-              value={budget}
-              onChange={(e) => setBudget(e.target.value)}
-              required
-            />
-            <small>
-              Calls reserve a conservative estimate; billing may differ.
-            </small>
-          </label>
+          {localOnly ? (
+            <div className="lx-info lx-form-policy">
+              <ShieldCheck />
+              <span>
+                <strong>$0 external AI API cost</strong>
+                Up to {state.runtimePolicy?.localCallLimit} local model attempts
+                per project, including failed attempts. Server compute and
+                storage remain separate costs.
+              </span>
+            </div>
+          ) : (
+            <label className="lx-field">
+              Model budget · USD
+              <input
+                type="number"
+                min="0.25"
+                max="10000"
+                step="0.01"
+                value={budget}
+                onChange={(e) => setBudget(e.target.value)}
+                required
+              />
+              <small>
+                Calls reserve a conservative estimate; billing may differ.
+              </small>
+            </label>
+          )}
         </div>
         <fieldset className="lx-team-picker">
           <legend>Assign your team</legend>
@@ -624,23 +639,29 @@ const providerPresets = [
 ];
 function ProviderForm({
   provider,
+  localOnly = false,
   onClose,
   onSaved,
   action,
 }: {
   provider?: LiveProvider;
+  localOnly?: boolean;
   onClose: () => void;
   onSaved: () => void;
   action: Action;
 }) {
-  const [label, setLabel] = useState(provider?.label || "OpenAI"),
+  const presets = localOnly
+    ? providerPresets.filter((preset) => preset.label === "Local Ollama")
+    : providerPresets;
+  const initial = presets[0];
+  const [label, setLabel] = useState(provider?.label || initial.label),
     [type, setType] = useState<"openai" | "anthropic">(
-      provider?.type || "openai",
+      provider?.type || initial.type,
     ),
-    [baseUrl, setBase] = useState(provider?.baseUrl || providerPresets[0].url),
-    [model, setModel] = useState(provider?.model || providerPresets[0].model),
+    [baseUrl, setBase] = useState(provider?.baseUrl || initial.url),
+    [model, setModel] = useState(provider?.model || initial.model),
     [key, setKey] = useState(""),
-    [local, setLocal] = useState(provider?.local ?? false),
+    [local, setLocal] = useState(localOnly || provider?.local || false),
     [roles, setRoles] = useState(provider?.roles?.join(", ") || ""),
     [priority, setPriority] = useState(provider?.priority ?? 1),
     [enabled, setEnabled] = useState(provider?.enabled ?? true),
@@ -688,17 +709,18 @@ function ProviderForm({
       wide
     >
       <p className="lx-intro">
-        Connect one model or a team of models. Keys are encrypted on the server
-        and are never saved in browser storage.
+        {localOnly
+          ? "Only local model servers are allowed. Agents share server resources; no paid AI API key is required."
+          : "Connect one model or a team of models. Keys are encrypted on the server and are never saved in browser storage."}
       </p>
       <Form onAction={submit}>
         {!provider && (
           <label className="lx-field">
             Quick setup
             <select
-              defaultValue="OpenAI"
+              defaultValue={initial.label}
               onChange={(e) => {
-                const p = providerPresets.find(
+                const p = presets.find(
                   (p) => p.label === e.target.value,
                 )!;
                 setLabel(p.label);
@@ -708,7 +730,7 @@ function ProviderForm({
                 setLocal(p.label === "Local Ollama");
               }}
             >
-              {providerPresets.map((p) => (
+              {presets.map((p) => (
                 <option key={p.label}>{p.label}</option>
               ))}
             </select>
@@ -728,12 +750,13 @@ function ProviderForm({
             API format
             <select
               value={type}
+              disabled={localOnly}
               onChange={(e) =>
                 setType(e.target.value as "openai" | "anthropic")
               }
             >
               <option value="openai">OpenAI compatible</option>
-              <option value="anthropic">Anthropic</option>
+              {!localOnly && <option value="anthropic">Anthropic</option>}
             </select>
           </label>
         </div>
@@ -746,8 +769,9 @@ function ProviderForm({
             required
           />
           <small>
-            Custom endpoints require the administrator's host allowlist. Local
-            Ollama can use host.docker.internal.
+            {localOnly
+              ? "Use http://ollama:11434/v1 for the cloud model service, or host.docker.internal for a model on your computer."
+              : "Custom endpoints require the administrator's host allowlist. Local Ollama can use host.docker.internal."}
           </small>
         </label>
         <div className="lx-form-grid">
@@ -762,7 +786,7 @@ function ProviderForm({
             />
           </label>
           <label className="lx-field">
-            API key
+            {localOnly ? "Local server key · optional" : "API key"}
             {provider?.keyPresent && (
               <small>
                 Saved key ending {provider.last4 || "••••"}. Leave blank to keep
@@ -778,7 +802,9 @@ function ProviderForm({
               placeholder={
                 provider?.keyPresent
                   ? "Leave blank to keep saved key"
-                  : "Paste key · optional for local Ollama"
+                  : localOnly
+                    ? "No key needed for the managed Ollama service"
+                    : "Paste key · optional for local Ollama"
               }
               maxLength={4096}
             />
@@ -814,6 +840,7 @@ function ProviderForm({
           <input
             type="checkbox"
             checked={local}
+            disabled={localOnly}
             onChange={(e) => setLocal(e.target.checked)}
           />
           Keyless local Ollama connection
@@ -850,12 +877,16 @@ function ProviderForm({
 }
 
 function Settings({
+  state,
   action,
   refresh,
 }: {
+  state: LiveState;
   action: Action;
   refresh: () => Promise<void>;
 }) {
+  const localOnly = state.runtimePolicy?.localOnly === true;
+  const modelConfigured = state.capabilities.modelConfigured === true;
   const [providers, setProviders] = useState<LiveProvider[]>([]),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
@@ -882,23 +913,61 @@ function Settings({
         <div>
           <span className="lx-eyebrow">COMPANY SETTINGS</span>
           <h2>AI connections</h2>
-          <p>One model or many. Give every specialist the right connection.</p>
+          <p>
+            {localOnly
+              ? "Local models only. Your named agents share the server's model resources."
+              : "One model or many. Give every specialist the right connection."}
+          </p>
         </div>
         <button
           className="lx-button lx-primary"
           onClick={() => setEditor("new")}
         >
           <Plus />
-          Add provider
+          {localOnly ? "Add local connection" : "Add provider"}
         </button>
       </div>
       <div className="lx-info">
         <ShieldCheck />
         <span>
-          API keys stay encrypted on your server. Agents cannot view keys or
-          edit these settings. Connections are scoped to your account.
+          {localOnly
+            ? "$0 external AI API cost. Remote AI providers are blocked by the server. Cloud VM, disk and network usage still consume cloud credits."
+            : "API keys stay encrypted on your server. Agents cannot view keys or edit these settings. Connections are scoped to your account."}
         </span>
       </div>
+      {localOnly && (
+        <section className="lx-local-runtime" aria-label="Local model policy">
+          <div>
+            <Brain size={24} />
+            <span>
+              <strong>
+                {modelConfigured
+                  ? "Local connection configured"
+                  : "Local connection required"}
+              </strong>
+              <small>
+                {modelConfigured
+                  ? "You can send an agent a short message to verify an actual model response. A configured connection does not verify model availability."
+                  : "Ask the server administrator to start Ollama, or add a local connection below. No paid AI API key is needed."}
+              </small>
+            </span>
+          </div>
+          <dl>
+            <div>
+              <dt>Project model attempts</dt>
+              <dd>{state.runtimePolicy?.localCallLimit}</dd>
+            </div>
+            <div>
+              <dt>Concurrent jobs</dt>
+              <dd>{state.runtimePolicy?.workerConcurrency}</dd>
+            </div>
+          </dl>
+          <p>
+            CPU responses can take minutes. Queued and running jobs appear in
+            Activity; successful replies record their actual response time.
+          </p>
+        </section>
+      )}
       {error && (
         <p className="lx-error" role="alert">
           {error}
@@ -917,11 +986,24 @@ function Settings({
                 <div className="lx-provider-symbol">
                   <Brain size={24} />
                 </div>
-                <Status value={p.enabled ? "enabled" : "disabled"} />
+                <Status
+                  value={
+                    localOnly && !p.local
+                      ? "blocked"
+                      : p.enabled
+                        ? "enabled"
+                        : "disabled"
+                  }
+                />
               </header>
               <h3>{p.label}</h3>
               <p className="lx-provider-model">{p.model}</p>
               <p className="lx-muted lx-break">{p.baseUrl}</p>
+              {localOnly && !p.local && (
+                <p className="lx-muted">
+                  Remote connection blocked by local-only server policy.
+                </p>
+              )}
               <dl>
                 <div>
                   <dt>Routes</dt>
@@ -945,6 +1027,7 @@ function Settings({
               <footer>
                 <button
                   className="lx-button lx-secondary"
+                  disabled={localOnly && !p.local}
                   onClick={() => setEditor(p)}
                 >
                   Edit
@@ -960,25 +1043,44 @@ function Settings({
           ))}
         </div>
       ) : (
-        <Empty title="Connect your first AI provider">
-          Add your API key to unlock real agent planning and chat. Local Ollama
-          is supported too.
+        <Empty
+          title={
+            localOnly
+              ? modelConfigured
+                ? "Using the server-managed local connection"
+                : "Connect your local model"
+              : "Connect your first AI provider"
+          }
+        >
+          {localOnly
+            ? modelConfigured
+              ? "No additional provider entry or paid API key is required. Agents use the local connection configured for this account."
+              : "Add the address and model ID of your local server, or ask the administrator to configure it."
+            : "Add your API key to unlock real agent planning and chat. Local Ollama is supported too."}
         </Empty>
       )}
       <div className="lx-settings-guide">
-        <h3>How multiple models work together</h3>
+        <h3>
+          {localOnly
+            ? "How your local workforce works"
+            : "How multiple models work together"}
+        </h3>
         <div>
           <span>01</span>
           <p>
-            <strong>Choose by role</strong>Route planning to a reasoning model
-            and development to a coding model.
+            <strong>{localOnly ? "Share one model" : "Choose by role"}</strong>
+            {localOnly
+              ? "Every specialist keeps its own role and project context while sharing the local model."
+              : "Route planning to a reasoning model and development to a coding model."}
           </p>
         </div>
         <div>
           <span>02</span>
           <p>
-            <strong>Keep work bounded</strong>Project budgets cover every model
-            attempt. A failed call can try one alternate provider.
+            <strong>Keep work bounded</strong>
+            {localOnly
+              ? "Every local attempt, including a failed call, counts toward the project's finite model limit. No paid provider fallback is allowed."
+              : "Project budgets cover every model attempt. A failed call can try one alternate provider."}
           </p>
         </div>
         <div>
@@ -992,6 +1094,7 @@ function Settings({
       {editor && (
         <ProviderForm
           provider={editor === "new" ? undefined : editor}
+          localOnly={localOnly}
           action={action}
           onClose={() => setEditor(null)}
           onSaved={() => {
@@ -1046,6 +1149,7 @@ function HireForm({
   action: Action;
   onClose: () => void;
 }) {
+  const localOnly = state.runtimePolicy?.localOnly === true;
   const templates = (state.capabilities.agentTemplates as
     | { id: string; role: string }[]
     | undefined) || [
@@ -1142,18 +1246,29 @@ function HireForm({
           />
         </label>
         <div className="lx-form-grid">
-          <label className="lx-field">
-            Budget ceiling · USD
-            <input
-              type="number"
-              required
-              min="0.25"
-              max="1000"
-              step="0.01"
-              value={budget}
-              onChange={(e) => setBudget(e.target.value)}
-            />
-          </label>
+          {localOnly ? (
+            <div className="lx-info lx-form-policy">
+              <ShieldCheck />
+              <span>
+                <strong>Shares the project's local model limit</strong>
+                Hiring adds a scoped role, not another loaded model or paid AI
+                subscription.
+              </span>
+            </div>
+          ) : (
+            <label className="lx-field">
+              Budget ceiling · USD
+              <input
+                type="number"
+                required
+                min="0.25"
+                max="1000"
+                step="0.01"
+                value={budget}
+                onChange={(e) => setBudget(e.target.value)}
+              />
+            </label>
+          )}
           <label className="lx-field">
             Expires after · hours
             <input
@@ -1310,7 +1425,9 @@ function Chat({
         {pending.length > 0 && (
           <div className="lx-chat-pending" data-state="running">
             <span className="motion-spinner" />
-            Response queued or running · see Activity for actual status
+            {state.runtimePolicy?.localOnly
+              ? "Local response queued or running. CPU inference may take minutes; see Activity for actual status."
+              : "Response queued or running · see Activity for actual status"}
           </div>
         )}
         {blocked.map((task) => (
@@ -1433,6 +1550,177 @@ function ArtifactViewer({ id, onClose }: { id: string; onClose: () => void }) {
   );
 }
 
+function ResearchPanel({
+  state,
+  project,
+  action,
+  onArtifact,
+  onMemory,
+}: {
+  state: LiveState;
+  project: LiveProject;
+  action: Action;
+  onArtifact: (id: string) => void;
+  onMemory: () => void;
+}) {
+  const [query, setQuery] = useState(project.brief.slice(0, 1000)),
+    [urls, setUrls] = useState(""),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const jobs = state.tasks.filter(
+    (task) => task.projectId === project.id && task.kind === "research",
+  );
+  const pending = jobs.filter((task) =>
+    ["queued", "running"].includes(task.status),
+  );
+  const sources = state.artifacts.filter(
+    (artifact) =>
+      artifact.projectId === project.id && artifact.kind.startsWith("research"),
+  );
+  const submit = async () => {
+    if (busy || pending.length) return;
+    setError("");
+    const question = query.trim();
+    const sourceUrls = urls
+      .split("\n")
+      .map((url) => url.trim())
+      .filter(Boolean);
+    if (question.length < 10 || question.length > 1000) {
+      setError("Enter a research question between 10 and 1,000 characters.");
+      return;
+    }
+    if (sourceUrls.length > 3) {
+      setError("Enter up to three source URLs, one per line.");
+      return;
+    }
+    try {
+      for (const sourceUrl of sourceUrls) {
+        if (new URL(sourceUrl).protocol !== "https:")
+          throw new Error("Use HTTPS source URLs.");
+      }
+    } catch {
+      setError("Use valid HTTPS source URLs, one per line.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await action(`/projects/${project.id}/research`, {
+        query: question,
+        urls: sourceUrls,
+      });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="lx-research">
+      <p className="lx-intro">
+        Search public GitHub repositories and documentation, or read allowed
+        HTTPS source URLs. Saved extracts keep their citations and remain
+        untrusted until you review them. Research does not execute downloaded
+        content or train model weights.
+      </p>
+      <Form onAction={submit}>
+        <label className="lx-field">
+          Research question
+          <textarea
+            required
+            minLength={10}
+            maxLength={1000}
+            rows={3}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Find the official documentation and relevant examples for this project…"
+          />
+        </label>
+        <label className="lx-field">
+          Source URLs (optional)
+          <textarea
+            maxLength={6500}
+            rows={3}
+            value={urls}
+            onChange={(event) => setUrls(event.target.value)}
+            placeholder="https://github.com/owner/repository"
+          />
+          <small>
+            Up to three HTTPS URLs, one per line. The server checks allowed
+            hosts and response limits.
+          </small>
+        </label>
+        <button
+          className="lx-button lx-primary"
+          type="submit"
+          disabled={busy || pending.length > 0}
+        >
+          {busy ? <span className="motion-spinner" /> : <MagnifyingGlass />}
+          Run research
+        </button>
+      </Form>
+      {error && (
+        <p className="lx-error" role="alert">
+          {error}
+        </p>
+      )}
+      {pending.length > 0 && (
+        <p className="lx-info" role="status">
+          Research is queued or running. The jobs below show its actual status;
+          saved sources and reports appear in Evidence.
+        </p>
+      )}
+      <h3 className="lx-subheading">Research jobs</h3>
+      <div className="lx-task-list">
+        {jobs.length ? (
+          jobs.map((job) => (
+            <article className="lx-task" key={job.id}>
+              <div>
+                <strong>Research</strong>
+                <Status value={job.status} />
+              </div>
+              {job.error && <p className="lx-error">{job.error}</p>}
+              <small>{date(job.updatedAt || job.createdAt)}</small>
+            </article>
+          ))
+        ) : (
+          <p className="lx-muted">No research has run for this project.</p>
+        )}
+      </div>
+      {sources.length > 0 && (
+        <>
+          <h3 className="lx-subheading">Saved research evidence</h3>
+          <div className="lx-artifact-list">
+            {sources.map((source) => (
+              <button
+                className="lx-artifact-row"
+                key={source.id}
+                onClick={() => onArtifact(source.id)}
+              >
+                <FileText size={26} />
+                <span>
+                  <strong>{source.name}</strong>
+                  <small>Source material · verify before reuse</small>
+                </span>
+                <ArrowSquareOut />
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <div className="lx-info">
+        <ShieldCheck />
+        <span>
+          Review the sources, then approve useful facts in Memory. Source text
+          cannot grant an agent permissions or override your instructions.
+          <button className="lx-text-button" onClick={onMemory}>
+            Open Memory
+          </button>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function MemoryPanel({
   state,
   project,
@@ -1445,7 +1733,35 @@ function MemoryPanel({
   const [content, setContent] = useState(""),
     [source, setSource] = useState(""),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [search, setSearch] = useState(""),
+    [searchResults, setSearchResults] = useState<LiveKnowledgeItem[] | null>(null),
+    [searchBusy, setSearchBusy] = useState(false),
+    [searchError, setSearchError] = useState("");
+  const searchGeneration = useRef(0);
+  useEffect(
+    () => () => {
+      searchGeneration.current++;
+    },
+    [],
+  );
+  const findKnowledge = async () => {
+    if (!search.trim() || searchBusy) return;
+    const generation = ++searchGeneration.current;
+    setSearchBusy(true);
+    setSearchError("");
+    try {
+      const result = await api<{ items: LiveKnowledgeItem[] }>(
+        `/projects/${project.id}/knowledge?q=${encodeURIComponent(search.trim())}`,
+      );
+      if (generation === searchGeneration.current) setSearchResults(result.items);
+    } catch (e) {
+      if (generation === searchGeneration.current)
+        setSearchError((e as Error).message);
+    } finally {
+      if (generation === searchGeneration.current) setSearchBusy(false);
+    }
+  };
   const save = async () => {
     if (busy) return;
     setBusy(true);
@@ -1469,6 +1785,50 @@ function MemoryPanel({
         Save verified requirements, decisions, and preferences. Retrieval stays
         within this project.
       </p>
+      <section className="lx-knowledge-search" aria-label="Project knowledge search">
+        <Form onAction={findKnowledge}>
+          <label className="lx-field">
+            Search project knowledge
+            <input
+              required
+              maxLength={200}
+              value={search}
+              onChange={(event) => {
+                searchGeneration.current++;
+                setSearch(event.target.value);
+                setSearchResults(null);
+                setSearchError("");
+                setSearchBusy(false);
+              }}
+              placeholder="Search approved memories and saved research…"
+            />
+          </label>
+          <Submit onAction={findKnowledge} busy={searchBusy}>
+            <MagnifyingGlass />
+            Search knowledge
+          </Submit>
+        </Form>
+        {searchError && (
+          <p className="lx-error" role="alert">
+            {searchError}
+          </p>
+        )}
+        {searchResults !== null && (
+          <div className="lx-knowledge-results" aria-live="polite">
+            <p className="lx-muted">
+              {searchResults.length} project context items. Research sources
+              remain untrusted; verify facts before approving them below.
+            </p>
+            {searchResults.map((item) => (
+              <article className="lx-knowledge-result" key={item.id}>
+                <strong>{item.name}</strong>
+                <small>{human(item.kind)}</small>
+                <p>{item.snippet}</p>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
       <Form onAction={save}>
         <label className="lx-field">
           Approved knowledge
@@ -1955,7 +2315,9 @@ function ProjectWorkspace({
           </span>
           <Status value={project.status} />
           <span className="lx-budget">
-            {money(project.spentCents)} reserved / {money(project.budgetCents)}
+            {state.runtimePolicy?.localOnly
+              ? `$0 external AI API cost · ${project.localCalls ?? 0} / ${state.runtimePolicy.localCallLimit} local attempts`
+              : `${money(project.spentCents)} reserved / ${money(project.budgetCents)}`}
           </span>
         </div>
         <div className="lx-tabs" role="tablist" aria-label="Project workspace">
@@ -1963,6 +2325,7 @@ function ProjectWorkspace({
             [
               "Overview",
               "Chat",
+              "Research",
               "Evidence",
               "Memory",
               "Improve",
@@ -2136,12 +2499,21 @@ function ProjectWorkspace({
               onArtifact={onArtifact}
             />
           )}
+          {tab === "Research" && (
+            <ResearchPanel
+              state={state}
+              project={project}
+              action={action}
+              onArtifact={onArtifact}
+              onMemory={() => setTab("Memory")}
+            />
+          )}
           {tab === "Evidence" && (
             <>
               <p className="lx-intro">
-                Files, manifests, diffs, and actual test outcomes from this
-                project. An artifact is evidence of what was produced; its test
-                report determines whether checks passed.
+                Research citations, files, manifests, diffs, and actual test
+                outcomes from this project. An artifact records what was
+                produced; a test report determines whether checks passed.
               </p>
               <div className="lx-artifact-list">
                 {artifacts.length ? (
@@ -2162,9 +2534,10 @@ function ProjectWorkspace({
                     </button>
                   ))
                 ) : (
-                  <Empty title="No delivery evidence yet">
-                    Run an approved project plan to produce candidate files and
-                    actual verification results.
+                  <Empty title="No project evidence yet">
+                    Run research to save cited sources, or run an approved
+                    project plan to produce candidate files and verification
+                    results.
                   </Empty>
                 )}
               </div>
@@ -2509,6 +2882,7 @@ export default function LiveApp() {
     state.capabilities.modelConfigured ??
     state.capabilities.model ??
     state.capabilities.providerConfigured;
+  const localOnly = state.runtimePolicy?.localOnly === true;
   return (
     <div className={`lx-app ${mobile ? "lx-nav-open" : ""}`}>
       <a className="skip-link" href="#live-main">
@@ -2710,8 +3084,14 @@ export default function LiveApp() {
           >
             <Lightning size={22} />
             <span>
-              <strong>Connect your AI to get started.</strong> Add one or
-              several providers in Settings. No model work is simulated.
+              <strong>
+                {localOnly
+                  ? "Connect your local model to get started."
+                  : "Connect your AI to get started."}
+              </strong>{" "}
+              {localOnly
+                ? "No paid AI API key is required. Check the local connection in Settings."
+                : "Add one or several providers in Settings. No model work is simulated."}
             </span>
             <ArrowRight />
           </button>
@@ -2942,8 +3322,14 @@ export default function LiveApp() {
                   </div>
                   <footer>
                     <span>
-                      {money(p.spentCents)} / {money(p.budgetCents)}
-                      <small>Reserved estimate / budget</small>
+                      {localOnly
+                        ? `${p.localCalls ?? 0} / ${state.runtimePolicy?.localCallLimit} local attempts`
+                        : `${money(p.spentCents)} / ${money(p.budgetCents)}`}
+                      <small>
+                        {localOnly
+                          ? "$0 external AI API cost"
+                          : "Reserved estimate / budget"}
+                      </small>
                     </span>
                     <ArrowRight />
                   </footer>
@@ -3024,7 +3410,9 @@ export default function LiveApp() {
         {view === "Reviews" && (
           <Reviews state={state} action={action} onArtifact={setArtifact} />
         )}
-        {view === "Settings" && <Settings action={action} refresh={refresh} />}
+        {view === "Settings" && (
+          <Settings state={state} action={action} refresh={refresh} />
+        )}
       </main>
       {projectForm && (
         <ProjectForm

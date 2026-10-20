@@ -34,6 +34,10 @@ OpenAI-compatible bases include OpenAI `/v1`, OpenRouter `/api/v1`, Groq `/opena
 
 For local Ollama, use `http://host.docker.internal:11434/v1` with keyless local mode. Its model must already be available and its server must accept connections from Docker's host gateway. Attendx does not install or start Ollama.
 
+The optional [Google Cloud profile](google-cloud.md) adds a private Ollama service and model initialization. `ATTENDX_LOCAL_ONLY=true` rejects remote AI connections in both Settings and the worker. Local calls record zero external API reservation and consume `ATTENDX_LOCAL_MAX_CALLS_PER_PROJECT` (default 200), including failed model attempts. This does not make VM, storage, network or electricity free. `ATTENDX_WORKER_CONCURRENCY` accepts 1–2; `ATTENDX_MODEL_TIMEOUT_MS` allows a bounded local CPU timeout up to 900000 milliseconds, while remote calls remain capped at 120000; `ATTENDX_MODEL_MAX_TOKENS` is capped at 8192. Keep Ollama cloud features disabled for this profile.
+
+Project Research reads up to three public source extracts. Default allowed hosts are `api.github.com`, `raw.githubusercontent.com`, `github.com`, `developer.mozilla.org`, `nodejs.org`, `docs.python.org` and `docs.ollama.com`; `ATTENDX_RESEARCH_HOSTS` adds exact administrator-approved hosts. HTTPS, public DNS addresses, pinned TLS connections, bounded redirects and response limits remain enforced. The collector uses direct HTTPS; environments requiring an outbound proxy may need an approved gateway integration. Source text remains untrusted and is separate from owner-approved memories. Knowledge retrieval uses scoped SQLite lexical matching without another model or database service.
+
 Custom HTTPS hosts require administrator configuration via `ATTENDX_PROVIDER_HOSTS` in a local `.env`, followed by Compose reconciliation. Optional environment fallback uses `ATTENDX_MODEL`, `ATTENDX_MODEL_API_KEY`, `ATTENDX_MODEL_BASE_URL` and `ATTENDX_MODEL_LOCAL`; it is restricted to the first account. Prefer per-account Settings. Never commit `.env` or use browser `VITE_` variables for keys.
 
 ## Cloud proxy certificates

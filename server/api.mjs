@@ -16,6 +16,8 @@ import {
 import { dirname } from "node:path";
 import { Store, HttpError, assert } from "./core.mjs";
 import { sourceZip } from "./archive.mjs";
+import { runtimePolicy, isLocalProvider } from "./runtime-policy.mjs";
+import { providerAvailable } from "./provider.mjs";
 
 const scrypt = promisify(scryptCallback);
 const publicUser = ({ id, name, email }) => ({ id, name, email });
@@ -86,6 +88,8 @@ function sessionCookie(token, secure, clear = false) {
 }
 
 export function createServer(options = {}) {
+  const env = options.env ?? process.env;
+  const policy = runtimePolicy(env);
   const store =
     options.store ||
     new Store({
@@ -299,23 +303,28 @@ export function createServer(options = {}) {
         return json(res, 200, {
           user,
           ...snapshot,
+          runtimePolicy: policy,
           capabilities: {
             ...snapshot.capabilities,
+            billing: policy.localOnly
+              ? "local model compute; no external AI API charge"
+              : snapshot.capabilities.billing,
             modelConfigured: registry
               ? registry
                   .list(user.id)
                   .some(
                     (provider) =>
                       provider.enabled &&
+                      (!policy.localOnly || isLocalProvider(provider)) &&
                       (provider.keyPresent || provider.local),
                   ) ||
-                (!!process.env.ATTENDX_MODEL &&
+                (providerAvailable(undefined, { env }) &&
                   store.db
                     .prepare(
                       "SELECT id FROM users ORDER BY created_at,rowid LIMIT 1",
                     )
                     .get()?.id === user.id)
-              : !!process.env.ATTENDX_MODEL &&
+              : providerAvailable(undefined, { env }) &&
                 store.db
                   .prepare(
                     "SELECT id FROM users ORDER BY created_at,rowid LIMIT 1",
@@ -362,7 +371,13 @@ export function createServer(options = {}) {
       }
       if (path === "/api/providers" && method === "POST") {
         assert(registry, 503, "Provider settings are unavailable");
-        const provider = await registry.save(user.id, await body(req));
+        const input = await body(req);
+        assert(
+          !policy.localOnly || isLocalProvider(input),
+          403,
+          "This server permits local AI models only",
+        );
+        const provider = await registry.save(user.id, input);
         store.emit(user.id, null, null, "AI provider configuration added", {
           providerId: provider.id,
         });
@@ -376,7 +391,17 @@ export function createServer(options = {}) {
         assert(registry, 503, "Provider settings are unavailable");
         const id = providerMatch[1];
         if (method === "PATCH" && !providerMatch[2]) {
-          const provider = await registry.save(user.id, await body(req), id);
+          const input = await body(req);
+          if (policy.localOnly) {
+            const previous = registry.list(user.id).find((item) => item.id === id);
+            assert(previous, 404, "Provider not found");
+            assert(
+              isLocalProvider({ ...previous, ...input }),
+              403,
+              "This server permits local AI models only",
+            );
+          }
+          const provider = await registry.save(user.id, input, id);
           store.emit(user.id, null, null, "AI provider configuration updated", {
             providerId: id,
           });
@@ -399,6 +424,36 @@ export function createServer(options = {}) {
       if (method === "POST" && path === "/api/projects") {
         const project = store.createProject(user.id, await body(req));
         return json(res, 201, { project });
+      }
+      const knowledgeMatch = path.match(/^\/api\/projects\/([^/]+)\/knowledge$/);
+      if (method === "GET" && knowledgeMatch) {
+        const project = store.getProject(user.id, knowledgeMatch[1]);
+        const query = url.searchParams.get("q") || "";
+        assert(query.length <= 1000, 400, "Knowledge search is limited to 1000 characters");
+        return json(res, 200, { items: store.searchKnowledge(user.id, project.id, query, { limit: 5 }) });
+      }
+      const researchMatch = path.match(/^\/api\/projects\/([^/]+)\/research$/);
+      if (method === "POST" && researchMatch) {
+        const project = store.getProject(user.id, researchMatch[1]);
+        assert(!["paused", "cancelled"].includes(project.status), 409, "Project is stopped");
+        const input = await body(req);
+        assert(typeof input.query === "string" && input.query.trim().length >= 10 && input.query.length <= 1000,
+          400, "Research question must be 10–1000 characters");
+        const urls = input.urls ?? [];
+        assert(Array.isArray(urls) && urls.length <= 3, 400, "Research accepts at most three source URLs");
+        for (const value of urls) {
+          let parsed;
+          try { parsed = typeof value === "string" && value.length <= 1000 ? new URL(value) : null; } catch {}
+          assert(parsed && parsed.protocol === "https:" && !parsed.username && !parsed.password && (!parsed.port || parsed.port === "443"),
+            400, "Research sources must be HTTPS URLs without credentials");
+        }
+        assert(!store.db.prepare("SELECT id FROM jobs WHERE owner_id=? AND project_id=? AND kind='research' AND status IN ('queued','running')").get(user.id, project.id),
+          409, "Research is already queued or running for this project");
+        const assigned = store.db.prepare("SELECT id FROM agents WHERE owner_id=? AND project_id=? AND status!='paused' AND (expires_at IS NULL OR expires_at>?) ORDER BY CASE WHEN template='researcher' THEN 0 ELSE 1 END LIMIT 1").get(user.id, project.id, store.now());
+        assert(assigned, 409, "Assign an available agent to this project before research");
+        const job = store.enqueue(user.id, "research", project.id, assigned.id, { query: input.query.trim(), urls });
+        server.worker?.wake();
+        return json(res, 202, { jobId: job.id });
       }
       const projectMatch = path.match(
         /^\/api\/projects\/([^/]+)\/(plan|run|pause|resume|cancel|verify)$/,

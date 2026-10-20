@@ -4,6 +4,8 @@ const states = ["queued", "running", "blocked", "completed", "failed"] as const;
 
 /** Charts derive from recorded server jobs and reservations, never simulated data. */
 export default function LiveInsights({ state }: { state: LiveState }) {
+  const localOnly = state.runtimePolicy?.localOnly === true;
+  const localLimit = state.runtimePolicy?.localCallLimit ?? 200;
   const counts = states.map((status) => ({
     status,
     count: state.tasks.filter((task) => task.status === status).length,
@@ -49,22 +51,23 @@ export default function LiveInsights({ state }: { state: LiveState }) {
       </div>
       <div className="lx-insight-card">
         <header>
-          <h3>Project budget reservations</h3>
-          <small>Estimates, not provider invoices</small>
+          <h3>{localOnly ? "Local model calls" : "Project budget reservations"}</h3>
+          <small>{localOnly ? "$0 external AI API cost; cloud compute is separate" : "Estimates, not provider invoices"}</small>
         </header>
         {state.projects.slice(0, 5).map((project) => (
           <div className="lx-budget-chart" key={project.id}>
             <div>
               <span>{project.name}</span>
               <strong>
-                ${(project.spentCents / 100).toFixed(2)} / $
-                {(project.budgetCents / 100).toFixed(2)}
+                {localOnly
+                  ? `${project.localCalls ?? 0} / ${localLimit} calls`
+                  : `$${(project.spentCents / 100).toFixed(2)} / $${(project.budgetCents / 100).toFixed(2)}`}
               </strong>
             </div>
             <progress
-              value={project.spentCents}
-              max={project.budgetCents}
-              aria-label={`${project.name} budget reserved`}
+              value={localOnly ? project.localCalls ?? 0 : project.spentCents}
+              max={localOnly ? localLimit : project.budgetCents}
+              aria-label={`${project.name} ${localOnly ? "local model calls" : "budget reserved"}`}
             />
           </div>
         ))}

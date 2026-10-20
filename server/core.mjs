@@ -96,8 +96,12 @@ export class Store {
       CREATE TABLE IF NOT EXISTS skills(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,agent_id TEXT NOT NULL,version INTEGER NOT NULL,instructions TEXT NOT NULL,status TEXT NOT NULL,evaluation_json TEXT NOT NULL,created_at TEXT NOT NULL,project_id TEXT);
       CREATE TABLE IF NOT EXISTS schedules(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,project_id TEXT NOT NULL,interval_minutes INTEGER NOT NULL,next_run TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS agent_charges(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,project_id TEXT NOT NULL,agent_id TEXT NOT NULL,cents INTEGER NOT NULL,created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS local_model_usage(project_id TEXT PRIMARY KEY REFERENCES projects(id),owner_id TEXT NOT NULL REFERENCES users(id),calls INTEGER NOT NULL DEFAULT 0 CHECK(calls>=0),updated_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS jobs_claim ON jobs(status,created_at); CREATE INDEX IF NOT EXISTS events_owner ON events(owner_id,created_at);
-      CREATE INDEX IF NOT EXISTS projects_owner ON projects(owner_id); CREATE INDEX IF NOT EXISTS artifacts_owner ON artifacts(owner_id,project_id);`);
+      CREATE INDEX IF NOT EXISTS projects_owner ON projects(owner_id); CREATE INDEX IF NOT EXISTS artifacts_owner ON artifacts(owner_id,project_id);
+      CREATE INDEX IF NOT EXISTS local_model_usage_owner ON local_model_usage(owner_id,project_id);
+      CREATE INDEX IF NOT EXISTS memories_knowledge_scope ON memories(owner_id,project_id,approved,created_at);
+      CREATE INDEX IF NOT EXISTS artifacts_knowledge_scope ON artifacts(owner_id,project_id,kind,created_at);`);
     if (
       !this.db
         .prepare("PRAGMA table_info(skills)")
@@ -156,7 +160,13 @@ export class Store {
     return record(row);
   }
   getProject(ownerId, id) {
-    return this.scoped("projects", ownerId, id);
+    const project = this.scoped("projects", ownerId, id);
+    return {
+      ...project,
+      localCalls: this.db.prepare(
+        "SELECT calls FROM local_model_usage WHERE owner_id=? AND project_id=?",
+      ).get(ownerId, id)?.calls || 0,
+    };
   }
   getAgent(ownerId, id) {
     const agent = this.scoped("agents", ownerId, id);
@@ -188,7 +198,9 @@ export class Store {
           id,
           ownerId,
         );
-    return this.scoped(table, ownerId, id);
+    return table === "projects"
+      ? this.getProject(ownerId, id)
+      : this.scoped(table, ownerId, id);
   }
   updateProject(ownerId, id, patch) {
     return this.update(
@@ -336,7 +348,9 @@ export class Store {
       const id = this.id("project");
       const now = this.now();
       this.db
-        .prepare("INSERT INTO projects VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        .prepare(
+          "INSERT INTO projects(id,owner_id,name,brief,scope,stage,status,acceptance_criteria,repo_url,budget_cents,spent_cents,plan,plan_approved,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        )
         .run(
           id,
           ownerId,
@@ -375,7 +389,7 @@ export class Store {
       );
     }
     assert(
-      ["plan", "build", "chat", "verify", "improve"].includes(kind),
+      ["plan", "build", "chat", "verify", "improve", "research"].includes(kind),
       400,
       "Unsupported job kind",
     );
@@ -638,6 +652,53 @@ export class Store {
       return this.getProject(ownerId, projectId);
     });
   }
+  reserveLocalCall(ownerId, projectId, limit, agentId) {
+    assert(
+      Number.isSafeInteger(limit) && limit >= 1 && limit <= 100000,
+      400,
+      "Local model-call limit must be an integer from 1 to 100000",
+    );
+    return this.transaction(() => {
+      const project = this.getProject(ownerId, projectId);
+      assert(
+        !["paused", "cancelled"].includes(project.status),
+        409,
+        "Project is stopped",
+      );
+      if (agentId) {
+        const agent = this.getAgent(ownerId, agentId);
+        assert(agent.status !== "paused", 409, "Agent is paused");
+        assert(
+          !agent.expiresAt || agent.projectId === projectId,
+          403,
+          "Specialist authority is restricted to its assigned project",
+        );
+      }
+      const admitted = this.db
+        .prepare(
+          "INSERT INTO local_model_usage(project_id,owner_id,calls,updated_at) VALUES(?,?,1,?) ON CONFLICT(project_id) DO UPDATE SET calls=local_model_usage.calls+1,updated_at=excluded.updated_at WHERE local_model_usage.owner_id=excluded.owner_id AND local_model_usage.calls<?",
+        )
+        .run(projectId, ownerId, this.now(), limit);
+      if (admitted.changes !== 1) {
+        const error = new HttpError(
+          409,
+          "Local model-call limit exhausted; create a scoped follow-up project or ask the administrator to review its compute limit",
+        );
+        error.code = "local_call_limit";
+        throw error;
+      }
+      const updated = this.getProject(ownerId, projectId);
+      this.db.prepare("UPDATE projects SET updated_at=? WHERE owner_id=? AND id=?")
+        .run(this.now(), ownerId, projectId);
+      this.emit(ownerId, agentId || null, projectId, "Local model call admitted", {
+        localCalls: updated.localCalls,
+        localCallLimit: limit,
+        externalCostCents: 0,
+        billing: "local model compute; no external AI API charge",
+      });
+      return updated;
+    });
+  }
   hire(ownerId, input) {
     return this.transaction(() => {
       const p = this.getProject(ownerId, input.projectId);
@@ -860,6 +921,73 @@ export class Store {
       .all(ownerId, projectId)
       .map(record);
   }
+  searchKnowledge(ownerId, projectId, query, { limit = 5 } = {}) {
+    this.getProject(ownerId, projectId);
+    assert(
+      typeof query === "string" && query.length <= 12000,
+      400,
+      "Knowledge query must be text up to 12000 characters",
+    );
+    assert(
+      Number.isSafeInteger(limit) && limit >= 1 && limit <= 5,
+      400,
+      "Knowledge result limit must be an integer from 1 to 5",
+    );
+    const ignored = new Set([
+      "the", "and", "for", "with", "this", "that", "from", "your", "you",
+      "are", "was", "will", "can", "have", "has", "into", "about", "please",
+      "project", "build", "create", "implement", "how", "what", "them", "their",
+    ]);
+    const terms = [...new Set(
+      (query.toLowerCase().match(/[\p{L}\p{N}_]+/gu) || [])
+        .filter((word) => word.length >= 2 && word.length <= 64 && !ignored.has(word)),
+    )].slice(0, 12);
+    // Scope indexes narrow the corpus first. Rank the entire approved project
+    // corpus in SQLite instead of taking the latest memories before searching.
+    // This deliberately uses lexical matching, without another model/service.
+    const score = terms.map(() =>
+      "(CASE WHEN instr(lower(content),?)>0 THEN 1 ELSE 0 END + CASE WHEN instr(lower(name),?)>0 THEN 2 ELSE 0 END)",
+    ).join("+");
+    let rows = [];
+    if (terms.length) {
+      rows = this.db.prepare(`
+        WITH knowledge AS (
+          SELECT id,'memory' AS kind,'Owner-approved memory' AS name,content,created_at
+          FROM memories WHERE owner_id=? AND project_id=? AND approved=1
+          UNION ALL
+          SELECT id,'research-source' AS kind,name,
+            CASE WHEN json_valid(content) THEN
+              CASE WHEN json_type(content,'$.text')='text'
+                THEN substr(json_extract(content,'$.text'),1,24000) ELSE '' END
+              ELSE '' END AS content,
+            created_at FROM artifacts
+          WHERE owner_id=? AND project_id=? AND kind='research-source'
+        ), ranked AS (SELECT *,${score} AS relevance FROM knowledge)
+        SELECT id,kind,name,content,created_at FROM ranked WHERE relevance>0
+        ORDER BY relevance DESC,created_at DESC,id LIMIT ?
+      `).all(ownerId, projectId, ownerId, projectId,
+        ...terms.flatMap((term) => [term, term]), limit);
+    }
+    if (!rows.length) {
+      rows = this.db.prepare(
+        "SELECT id,'memory' AS kind,'Owner-approved memory' AS name,content,created_at FROM memories WHERE owner_id=? AND project_id=? AND approved=1 ORDER BY created_at DESC,id LIMIT ?",
+      ).all(ownerId, projectId, Math.min(limit, 3));
+    }
+    return rows.map((row) => {
+      const content = String(row.content || "");
+      const lower = content.toLowerCase();
+      const first = terms.map((term) => lower.indexOf(term)).filter((index) => index >= 0);
+      const start = Math.max(0, (first.length ? Math.min(...first) : 0) - 180);
+      const text = content.slice(start, start + 1196);
+      return {
+        id: row.id,
+        kind: row.kind,
+        name: String(row.name || "Project source").slice(0, 120),
+        snippet: `${start ? "… " : ""}${text}${content.length > start + text.length ? " …" : ""}`,
+        createdAt: row.created_at,
+      };
+    });
+  }
   addSkill(
     ownerId,
     agentId,
@@ -1014,9 +1142,13 @@ export class Store {
         )
         .all(ownerId, limit)
         .map(record);
+    const usage = new Map(this.db.prepare(
+      "SELECT project_id,calls FROM local_model_usage WHERE owner_id=?",
+    ).all(ownerId).map((row) => [row.project_id, row.calls]));
     const projects = list("projects").map((p) => ({
         ...p,
         description: p.brief,
+        localCalls: usage.get(p.id) || 0,
       })),
       agents = list("agents").map((a) => ({
         ...a,
@@ -1046,6 +1178,7 @@ export class Store {
       },
       metrics: {
         reservedCents: projects.reduce((n, p) => n + p.spentCents, 0),
+        localCalls: projects.reduce((n, p) => n + p.localCalls, 0),
         activeTasks: this.db
           .prepare(
             "SELECT count(*) AS n FROM jobs WHERE owner_id=? AND status='running'",

@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
+const localOnly = process.argv.includes("--local-only");
+const browserArgs = process.argv.slice(2).filter((arg) => arg !== "--local-only");
 const project = `attendx-check-${randomBytes(5).toString("hex")}`;
 const listener = createServer();
 await new Promise((resolve) => listener.listen(0, "127.0.0.1", resolve));
@@ -26,9 +28,15 @@ const env = {
   ATTENDX_MODEL_API_KEY: "",
   ATTENDX_MODEL_BASE_URL: "https://api.openai.com/v1",
   ATTENDX_MODEL_LOCAL: "false",
+  ATTENDX_LOCAL_ONLY: localOnly ? "true" : "false",
+  ATTENDX_WORKER_CONCURRENCY: localOnly ? "1" : "2",
+  ATTENDX_MODEL_TIMEOUT_MS: "45000",
+  ATTENDX_MODEL_MAX_TOKENS: "4096",
+  ATTENDX_LOCAL_MAX_CALLS_PER_PROJECT: localOnly ? "4" : "200",
   ATTENDX_PUBLIC_ORIGIN: "",
   ATTENDX_BASE_URL: `http://127.0.0.1:${port}`,
   ATTENDX_LIVE_TESTS: "1",
+  ATTENDX_LOCAL_TESTS: localOnly ? "1" : "0",
 };
 function run(command, args, required = true) {
   const result = spawnSync(command, args, { cwd: root, env, stdio: "inherit" });
@@ -64,7 +72,7 @@ try {
   fixture = true;
   process.exitCode = run(
     process.execPath,
-    ["node_modules/@playwright/test/cli.js", "test", ...process.argv.slice(2)],
+    ["node_modules/@playwright/test/cli.js", "test", "--output", join(root, "test-results", project), ...browserArgs],
     false,
   );
 } catch (error) {

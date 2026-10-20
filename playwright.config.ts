@@ -3,6 +3,9 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
+  testIgnore: process.env.ATTENDX_LOCAL_TESTS === '1'
+    ? ['**/office.spec.ts', '**/live.spec.ts', '**/embedded-preview.spec.ts']
+    : ['**/local-mode.spec.ts'],
   fullyParallel: true,
   workers: 2,
   retries: 0,

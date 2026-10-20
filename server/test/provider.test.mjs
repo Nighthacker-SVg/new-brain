@@ -5,6 +5,7 @@ import {
   providerAvailable,
   ProviderError,
 } from "../provider.mjs";
+import { isLocalProvider, runtimePolicy } from "../runtime-policy.mjs";
 
 const config = {
   type: "openai",
@@ -428,4 +429,125 @@ test("missing usage remains unknown and oversized input is rejected before fetch
     hasCode("invalid_request"),
   );
   assert.equal(called, 1);
+});
+
+test("runtime policy rejects malformed or unbounded limits instead of silently disabling them", () => {
+  assert.deepEqual(runtimePolicy({}), {
+    localOnly: false,
+    workerConcurrency: 2,
+    localCallLimit: 200,
+    modelTimeoutMs: 45_000,
+    maxTokens: 4_096,
+  });
+  assert.deepEqual(
+    runtimePolicy({
+      ATTENDX_LOCAL_ONLY: "true",
+      ATTENDX_WORKER_CONCURRENCY: "1",
+      ATTENDX_LOCAL_MAX_CALLS_PER_PROJECT: "12",
+      ATTENDX_MODEL_TIMEOUT_MS: "600000",
+      ATTENDX_MODEL_MAX_TOKENS: "1024",
+    }),
+    {
+      localOnly: true,
+      workerConcurrency: 1,
+      localCallLimit: 12,
+      modelTimeoutMs: 600_000,
+      maxTokens: 1_024,
+    },
+  );
+  for (const env of [
+    { ATTENDX_LOCAL_ONLY: "yes" },
+    { ATTENDX_WORKER_CONCURRENCY: "3" },
+    { ATTENDX_LOCAL_MAX_CALLS_PER_PROJECT: "0" },
+    { ATTENDX_LOCAL_MAX_CALLS_PER_PROJECT: "2garbage" },
+    { ATTENDX_MODEL_TIMEOUT_MS: "900001" },
+    { ATTENDX_MODEL_MAX_TOKENS: "8193" },
+  ])
+    assert.throws(() => createProvider({ env }), /ATTENDX_/);
+});
+
+test("local-only mode denies remote saved and environment configurations before any fetch", async () => {
+  let requests = 0;
+  const provider = createProvider({
+    env: {
+      ATTENDX_LOCAL_ONLY: "true",
+      ATTENDX_MODEL: config.model,
+      ATTENDX_MODEL_API_KEY: config.apiKey,
+    },
+    fetch: async () => {
+      requests += 1;
+      return result();
+    },
+  });
+  assert.equal(provider.configured, false);
+  assert.equal(provider.defaultLocal, false);
+  for (const setting of [config, { ...config, local: true }])
+    await assert.rejects(
+      provider.complete({ provider: setting, messages }),
+      hasCode("local_only"),
+    );
+  await assert.rejects(provider.complete({ messages }), hasCode("local_only"));
+  assert.equal(requests, 0);
+  assert.equal(isLocalProvider({ ...config, local: true }), false);
+  assert.equal(
+    isLocalProvider({ ...config, baseUrl: "http://ollama.attacker.test/v1", local: true }),
+    false,
+  );
+});
+
+test("local-only Ollama accepts keyless JSON requests with the configured output bound", async () => {
+  let request;
+  const provider = createProvider({
+    env: {
+      ATTENDX_LOCAL_ONLY: "true",
+      ATTENDX_MODEL_BASE_URL: "http://ollama:11434/v1",
+      ATTENDX_MODEL_LOCAL: "true",
+      ATTENDX_MODEL: "qwen2.5-coder:3b",
+      ATTENDX_MODEL_MAX_TOKENS: "1024",
+      ATTENDX_MODEL_TIMEOUT_MS: "600000",
+    },
+    fetch: async (url, init) => {
+      request = { url, ...init };
+      return result();
+    },
+  });
+  assert.equal(provider.configured, true);
+  assert.equal(provider.defaultLocal, true);
+  const response = await provider.complete({ messages, json: true, maxTokens: 4096 });
+  assert.equal(request.url, "http://ollama:11434/v1/chat/completions");
+  assert.equal(request.headers.Authorization, undefined);
+  const body = JSON.parse(request.body);
+  assert.equal(body.max_tokens, 1024);
+  assert.deepEqual(body.response_format, { type: "json_object" });
+  assert.equal(JSON.parse(response.text).summary, "A plan");
+});
+
+test("long model timeouts apply only to local inference and remote requests remain capped", async (t) => {
+  const delays = [];
+  const originalTimeout = globalThis.setTimeout;
+  t.mock.method(globalThis, "setTimeout", (callback, delay) => {
+    delays.push(delay);
+    return originalTimeout(callback, 1);
+  });
+  const provider = createProvider({
+    env: { ATTENDX_MODEL_TIMEOUT_MS: "900000" },
+    fetch: async () => new Promise(() => {}),
+  });
+  await assert.rejects(
+    provider.complete({ provider: config, messages }),
+    hasCode("timeout"),
+  );
+  await assert.rejects(
+    provider.complete({
+      provider: {
+        ...config,
+        baseUrl: "http://ollama:11434/v1",
+        apiKey: "",
+        local: true,
+      },
+      messages,
+    }),
+    hasCode("timeout"),
+  );
+  assert.deepEqual(delays, [120_000, 900_000]);
 });

@@ -31,6 +31,7 @@ export interface LiveProject {
   repoUrl?: string;
   budgetCents: number;
   spentCents: number;
+  localCalls?: number;
   plan?: unknown;
   planApproved?: boolean;
   createdAt?: string;
@@ -94,6 +95,14 @@ export interface LiveMemory {
   approved?: boolean;
   createdAt?: string;
 }
+export interface LiveKnowledgeItem {
+  id: string;
+  kind: string;
+  name: string;
+  snippet: string;
+  score?: number;
+  createdAt?: string;
+}
 export interface LiveSkill {
   id: string;
   projectId?: string;
@@ -138,4 +147,11 @@ export interface LiveState {
   schedules: LiveSchedule[];
   capabilities: Record<string, unknown>;
   metrics: Record<string, unknown>;
+  runtimePolicy?: {
+    localOnly: boolean;
+    workerConcurrency: number;
+    localCallLimit: number;
+    modelTimeoutMs: number;
+    maxTokens: number;
+  };
 }

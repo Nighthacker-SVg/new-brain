@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ProviderRegistry, validateProviderUrl } from "../providers.mjs";
 
-function setup(t) {
+function setup(t, options = {}) {
   const folder = mkdtempSync(join(tmpdir(), "attendx-provider-"));
   const db = new DatabaseSync(":memory:");
   db.exec(
@@ -14,7 +14,7 @@ function setup(t) {
   );
   const registry = new ProviderRegistry(
     { db },
-    { masterKeyPath: join(folder, "master.key") },
+    { masterKeyPath: join(folder, "master.key"), env: {}, ...options },
   );
   t.after(() => {
     db.close();
@@ -135,4 +135,34 @@ test("changing provider destinations never forwards the previous saved credentia
     saved.id,
   );
   assert.equal(registry.candidates("alice")[0].apiKey, "");
+});
+
+test("local-only registry rejects remote saves and ignores pre-existing remote fallback records", (t) => {
+  const { registry, db, folder } = setup(t);
+  registry.save("alice", { ...settings, roles: [], priority: 0 });
+  const local = registry.save("alice", {
+    ...settings,
+    label: "Local CPU model",
+    baseUrl: "http://ollama:11434/v1",
+    apiKey: "",
+    local: true,
+    roles: [],
+  });
+  const restricted = new ProviderRegistry(
+    { db },
+    {
+      masterKeyPath: join(folder, "master.key"),
+      env: { ATTENDX_LOCAL_ONLY: "true" },
+    },
+  );
+  assert.throws(
+    () => restricted.save("alice", settings),
+    (error) => error.status === 403 && /local models only/.test(error.message),
+  );
+  assert.deepEqual(restricted.candidates("alice").map((entry) => entry.id), [local.id]);
+  assert.equal(restricted.candidates("alice")[0].apiKey, "");
+  assert.equal(restricted.list("alice").length, 2);
+  restricted.save("alice", { model: "other-local-model" }, local.id);
+  assert.equal(restricted.candidates("alice")[0].model, "other-local-model");
+  assert.deepEqual(restricted.candidates("bob"), []);
 });

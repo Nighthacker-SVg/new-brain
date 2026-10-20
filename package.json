@@ -12,6 +12,7 @@
     "test:server": "node --test server/test/*.test.mjs runner/test/*.test.mjs",
     "test:runner": "node --test runner/test/docker.integration.mjs",
     "test:live": "node scripts/test-live.mjs",
+    "test:local": "node scripts/test-live.mjs --local-only",
     "server": "node server/api.mjs",
     "web-preview": "npm run build && vite preview --host 0.0.0.0 --port 4173 --strictPort"
   },
